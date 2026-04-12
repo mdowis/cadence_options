@@ -467,4 +467,5 @@ class RiskManager:
                     "count": self._state.balance_sync_count,
                 },
                 "drawdown_reference_mode": self.config.drawdown_reference,
+                "risk_events": list(self._state.risk_events[-10:]),
             }

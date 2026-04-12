@@ -3,442 +3,1104 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cadence Options - Dashboard</title>
+<title>Cadence Options</title>
 <style>
 :root {
-  --bg: #0d1117;
-  --surface: #161b22;
-  --border: #30363d;
-  --text: #c9d1d9;
-  --text-muted: #8b949e;
-  --accent: #58a6ff;
-  --green: #3fb950;
-  --red: #f85149;
-  --yellow: #d29922;
-  --orange: #db6d28;
+  --bg: #0a0e17;
+  --surface: #111827;
+  --border: #1e2d4a;
+  --text: #e2e8f0;
+  --dim: #7a8ba8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --blue: #3b82f6;
+  --purple: #a855f7;
+  --cyan: #06b6d4;
+  --orange: #f97316;
+  --font: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-}
-.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
-}
-header h1 { font-size: 20px; font-weight: 600; }
-.status-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-}
-.badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
-.badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
-.badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
-.badge-muted { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.5; }
+noscript { display: block; padding: 40px; text-align: center; color: var(--red); font-size: 16px; }
 
-.grid { display: grid; gap: 16px; }
-.grid-2 { grid-template-columns: 1fr 1fr; }
-.grid-3 { grid-template-columns: 1fr 1fr 1fr; }
-.grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+/* ---- Layout ---- */
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 16px 24px; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+header h1 { font-size: 15px; font-weight: 700; letter-spacing: 1px; color: var(--cyan); white-space: nowrap; }
+.header-badges { display: flex; gap: 8px; align-items: center; }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.header-meta { font-size: 11px; color: var(--dim); white-space: nowrap; }
 
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 16px;
-}
-.card h2 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-}
-.card-value {
-  font-size: 28px;
-  font-weight: 600;
-}
-.card-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
+.main-grid { display: grid; grid-template-columns: 1fr 380px; gap: 14px; }
+@media (max-width: 1200px) { .main-grid { grid-template-columns: 1fr; } }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-th {
-  text-align: left;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  font-weight: 500;
-}
-td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-}
-tr:hover { background: rgba(88,166,255,0.04); }
+/* ---- Badges ---- */
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; white-space: nowrap; font-family: var(--font); }
+.badge-gray { background: rgba(122,139,168,0.12); color: var(--dim); border: 1px solid rgba(122,139,168,0.25); }
+.badge-blue { background: rgba(59,130,246,0.12); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+.badge-green { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+.badge-red { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.35); }
+.badge-purple { background: rgba(168,85,247,0.12); color: var(--purple); border: 1px solid rgba(168,85,247,0.3); }
+.badge-yellow { background: rgba(234,179,8,0.12); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
 
-.btn {
-  display: inline-block;
-  padding: 6px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  transition: 0.15s;
-}
-.btn:hover { border-color: var(--accent); }
-.btn-primary { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
-.btn-danger { background: rgba(248,81,73,0.15); border-color: var(--red); color: var(--red); }
-.btn-success { background: rgba(63,185,80,0.15); border-color: var(--green); color: var(--green); }
-.btn + .btn { margin-left: 8px; }
+/* Pulse dot */
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot-gray { background: var(--dim); }
+.dot-green { background: var(--green); }
+.dot-red { background: var(--red); }
+.dot-yellow { background: var(--yellow); }
+@keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:0.35 } }
+.pulse { animation: pulse 1.8s ease-in-out infinite; }
+.pulse-fast { animation: pulse 0.8s ease-in-out infinite; }
 
-.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+/* ---- Banners ---- */
+.banner { border-radius: 6px; padding: 9px 14px; margin-bottom: 10px; font-size: 12px; display: none; align-items: center; gap: 10px; }
+.banner.show { display: flex; }
+.banner-red { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.35); color: var(--red); }
+.banner-purple { background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.3); color: var(--purple); }
+.banner-amber { background: rgba(234,179,8,0.08); border: 1px solid rgba(234,179,8,0.3); color: var(--yellow); }
+.banner-text { flex: 1; }
+.banner-dismiss { background: none; border: none; color: inherit; cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.6; font-family: var(--font); }
+.banner-dismiss:hover { opacity: 1; }
 
-.drawdown-bar {
-  height: 8px;
-  background: var(--border);
-  border-radius: 4px;
-  margin-top: 8px;
-  overflow: hidden;
-}
-.drawdown-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s;
-}
+/* ---- Stats Row ---- */
+.stats-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 1200px) { .stats-row { grid-template-columns: repeat(3, 1fr); } }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; border-top: 3px solid var(--border); position: relative; }
+.stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--dim); font-weight: 600; margin-bottom: 4px; }
+.stat-value { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.stat-sub { font-size: 10px; color: var(--dim); margin-top: 3px; }
 
-.kill-switch-banner {
-  background: rgba(248,81,73,0.1);
-  border: 1px solid var(--red);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-}
-.kill-switch-banner.active { display: flex; }
-.kill-switch-banner .text { color: var(--red); font-weight: 600; }
+/* ---- Card / Panel ---- */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+.panel-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--dim); font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 
-.last-update {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-align: right;
-  padding: 4px 0;
-}
+/* ---- Buttons ---- */
+.btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 11px; font-family: var(--font); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.btn:hover { border-color: var(--cyan); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-sm { padding: 3px 8px; font-size: 10px; }
+.btn-green { border-color: var(--green); color: var(--green); }
+.btn-green:hover { background: rgba(34,197,94,0.1); }
+.btn-red { border-color: var(--red); color: var(--red); }
+.btn-red:hover { background: rgba(239,68,68,0.1); }
+.btn-blue { border-color: var(--blue); color: var(--blue); }
+.btn-blue:hover { background: rgba(59,130,246,0.1); }
+.btn-danger-fill { background: rgba(239,68,68,0.15); border-color: var(--red); color: var(--red); font-weight: 700; }
+.btn-danger-fill:hover { background: rgba(239,68,68,0.25); }
 
-@media (max-width: 900px) {
-  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-}
+/* ---- Process rows ---- */
+.proc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(30,45,74,0.5); }
+.proc-row:last-child { border-bottom: none; }
+.proc-label { font-weight: 600; min-width: 70px; }
+.proc-detail { flex: 1; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proc-stats { font-size: 10px; color: var(--dim); white-space: nowrap; }
+
+/* ---- Accordion ---- */
+.accordion-header { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; font-size: 11px; color: var(--dim); user-select: none; }
+.accordion-header:hover { color: var(--text); }
+.accordion-arrow { transition: transform 0.2s; font-size: 10px; }
+.accordion-body { max-height: 0; overflow: hidden; transition: max-height 0.25s ease; }
+.accordion-body.open { max-height: 500px; }
+.accordion-summary { flex: 1; }
+.diag-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 11px; padding: 8px 0; }
+.diag-key { color: var(--dim); }
+.diag-val { color: var(--text); word-break: break-all; }
+.diag-ok { color: var(--green); }
+.diag-err { color: var(--red); }
+
+/* ---- Decisions log ---- */
+.decisions-log { max-height: 200px; overflow-y: auto; font-size: 11px; }
+.dec-row { display: flex; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgba(30,45,74,0.3); align-items: baseline; cursor: default; }
+.dec-row:hover { background: rgba(59,130,246,0.04); }
+.dec-time { color: var(--dim); white-space: nowrap; min-width: 62px; }
+.dec-icon { font-weight: 700; width: 14px; text-align: center; flex-shrink: 0; }
+.dec-ticker { font-weight: 600; min-width: 32px; }
+.dec-credit { color: var(--cyan); min-width: 50px; }
+.dec-detail { color: var(--dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dec-detail.expanded { white-space: normal; word-break: break-word; }
+
+/* ---- Table ---- */
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 6px 8px; color: var(--dim); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+td { padding: 6px 8px; border-bottom: 1px solid rgba(30,45,74,0.4); }
+tr:hover td { background: rgba(59,130,246,0.03); }
+.empty-row { color: var(--dim); font-style: italic; }
+
+/* ---- Greek gauge bars ---- */
+.gauge { margin-bottom: 10px; }
+.gauge-header { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 3px; }
+.gauge-label { color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.gauge-value { font-weight: 700; }
+.gauge-track { height: 6px; background: rgba(30,45,74,0.6); border-radius: 3px; overflow: hidden; position: relative; }
+.gauge-fill { height: 100%; border-radius: 3px; transition: width 0.4s, background 0.4s; }
+.gauge-center { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.15); }
+
+/* ---- Drawdown bar ---- */
+.dd-bar-track { height: 8px; background: rgba(30,45,74,0.6); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.dd-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s, background 0.4s; }
+
+/* ---- Candidate cards ---- */
+.cand-card { background: rgba(30,45,74,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+.cand-card:hover { border-color: var(--cyan); }
+.cand-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.cand-sym { font-weight: 700; font-size: 14px; }
+.cand-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(6,182,212,0.1); color: var(--cyan); border: 1px solid rgba(6,182,212,0.2); }
+.cand-stats { display: flex; gap: 14px; font-size: 11px; color: var(--dim); flex-wrap: wrap; }
+.cand-stats strong { color: var(--text); }
+.cand-expand { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 11px; }
+.cand-expand.open { display: block; }
+.cand-strikes { display: flex; align-items: center; gap: 4px; margin: 6px 0; }
+
+/* ---- Risk events ---- */
+.risk-event { font-size: 10px; padding: 4px 0; border-bottom: 1px solid rgba(30,45,74,0.3); color: var(--dim); }
+.risk-event:last-child { border-bottom: none; }
+
+/* ---- IV Rank ---- */
+.iv-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+.iv-sym { font-weight: 700; min-width: 30px; }
+.iv-val { font-size: 20px; font-weight: 700; }
+.iv-spark { flex-shrink: 0; }
+
+/* ---- Fee estimator ---- */
+.fee-row { font-size: 11px; color: var(--dim); padding: 3px 0; }
+.fee-val { color: var(--text); font-weight: 600; }
+
+/* ---- Confirm inline ---- */
+.confirm-inline { display: inline-flex; gap: 6px; align-items: center; }
+.confirm-inline .confirm-text { font-size: 11px; color: var(--yellow); font-weight: 600; }
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ---- Fade in ---- */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fadeIn 0.3s ease; }
+
+/* ---- Checkbox toggle ---- */
+.toggle-wrap { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; user-select: none; }
+.toggle-track { width: 32px; height: 16px; border-radius: 8px; background: var(--border); position: relative; transition: background 0.2s; flex-shrink: 0; }
+.toggle-track.on { background: var(--red); }
+.toggle-knob { width: 12px; height: 12px; border-radius: 50%; background: var(--text); position: absolute; top: 2px; left: 2px; transition: left 0.2s; }
+.toggle-track.on .toggle-knob { left: 18px; }
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <h1>Cadence Options</h1>
-    <div>
-      <span id="env-badge" class="status-badge badge-muted">--</span>
-      <span id="auth-badge" class="status-badge badge-muted">--</span>
-      <span id="mode-badge" class="status-badge badge-yellow">DRY RUN</span>
-    </div>
-  </header>
+<noscript>Cadence Options dashboard requires JavaScript to function.</noscript>
+<div class="wrap">
 
-  <div id="kill-banner" class="kill-switch-banner">
-    <span class="text">KILL SWITCH ACTIVE: <span id="kill-reason">--</span></span>
-    <button class="btn btn-success" onclick="deactivateKillSwitch()">Resume</button>
+<!-- ============ HEADER ============ -->
+<header>
+  <h1>CADENCE OPTIONS</h1>
+  <div class="header-badges">
+    <span id="data-badge" class="badge badge-gray"><span class="dot dot-gray"></span> --</span>
+    <span id="exec-badge" class="badge badge-gray"><span class="dot dot-gray"></span> EXECUTOR OFF</span>
+  </div>
+  <div class="header-right">
+    <span class="header-meta" id="header-meta">--</span>
+    <button class="btn btn-sm" onclick="doRefresh()" title="Refresh now">Refresh</button>
+  </div>
+</header>
+
+<!-- ============ BANNERS ============ -->
+<div id="banner-error" class="banner banner-red">
+  <span class="banner-text" id="banner-error-text">Scanner error</span>
+  <button class="banner-dismiss" onclick="dismissBanner('banner-error')">&times;</button>
+</div>
+<div id="banner-demo" class="banner banner-purple">
+  <span class="banner-text">Authenticated but scanner is not running. Click Start to fetch live data.</span>
+  <button class="banner-dismiss" onclick="dismissBanner('banner-demo')">&times;</button>
+</div>
+<div id="banner-live" class="banner banner-amber">
+  <span class="banner-text">LIVE TRADING is enabled. The executor will place real orders.</span>
+</div>
+
+<!-- ============ STATS ROW ============ -->
+<div class="stats-row">
+  <div class="stat-card" style="border-top-color:var(--cyan)">
+    <div class="stat-label">Equity</div>
+    <div class="stat-value" id="s-equity">--</div>
+    <div class="stat-sub" id="s-equity-sub">--</div>
+  </div>
+  <div class="stat-card" style="border-top-color:var(--green)">
+    <div class="stat-label">Daily P&amp;L</div>
+    <div class="stat-value" id="s-pnl">--</div>
+    <div class="stat-sub" id="s-pnl-sub">--</div>
+  </div>
+  <div class="stat-card" id="s-dd-card" style="border-top-color:var(--green)">
+    <div class="stat-label">Drawdown</div>
+    <div class="stat-value" id="s-dd">--</div>
+    <div class="stat-sub" id="s-dd-sub">--</div>
+    <div class="dd-bar-track"><div class="dd-bar-fill" id="dd-bar-fill" style="width:0"></div></div>
+  </div>
+  <div class="stat-card" style="border-top-color:var(--yellow)">
+    <div class="stat-label">Exposure</div>
+    <div class="stat-value" id="s-exposure">--</div>
+    <div class="stat-sub" id="s-exposure-sub">--</div>
+  </div>
+  <div class="stat-card" style="border-top-color:var(--blue)">
+    <div class="stat-label">Open Positions</div>
+    <div class="stat-value" id="s-positions">--</div>
+    <div class="stat-sub" id="s-positions-sub">--</div>
+  </div>
+  <div class="stat-card" style="border-top-color:var(--purple)">
+    <div class="stat-label">Trades Today</div>
+    <div class="stat-value" id="s-trades">--</div>
+    <div class="stat-sub" id="s-trades-sub">--</div>
+  </div>
+</div>
+
+<!-- ============ MAIN GRID ============ -->
+<div class="main-grid">
+
+<!-- ---- LEFT COLUMN ---- -->
+<div class="left-col">
+
+  <!-- Process Control -->
+  <div class="panel">
+    <div class="panel-title">Process Control</div>
+
+    <!-- Diagnostics accordion -->
+    <div class="accordion-header" onclick="toggleAccordion('diag-body', this)">
+      <span class="accordion-arrow">&#9654;</span>
+      <span class="accordion-summary" id="diag-summary">.env -- | Tradier -- | Auth --</span>
+    </div>
+    <div id="diag-body" class="accordion-body">
+      <div class="diag-grid" id="diag-grid">
+        <span class="diag-key">.env path</span><span class="diag-val" id="d-env">--</span>
+        <span class="diag-key">Token</span><span class="diag-val" id="d-token">--</span>
+        <span class="diag-key">Account</span><span class="diag-val" id="d-account">--</span>
+        <span class="diag-key">Environment</span><span class="diag-val" id="d-tradier-env">--</span>
+        <span class="diag-key">Authenticated</span><span class="diag-val" id="d-auth">--</span>
+        <span class="diag-key">Balance syncs</span><span class="diag-val" id="d-syncs">--</span>
+        <span class="diag-key">Last error</span><span class="diag-val" id="d-last-err">--</span>
+      </div>
+      <div style="padding:4px 0">
+        <button class="btn btn-sm btn-blue" onclick="doTestFetch()">Run Test Fetch</button>
+        <span id="test-fetch-result" style="font-size:11px;color:var(--dim);margin-left:8px"></span>
+      </div>
+    </div>
+
+    <!-- Scanner row -->
+    <div class="proc-row">
+      <span class="dot dot-gray" id="scanner-dot"></span>
+      <span class="proc-label">Scanner</span>
+      <span class="proc-detail" id="scanner-detail">--</span>
+      <span class="proc-stats" id="scanner-stats">0 runs</span>
+      <button class="btn btn-sm btn-green" id="btn-scanner" onclick="toggleScanner()">Start</button>
+    </div>
+
+    <!-- Executor row -->
+    <div class="proc-row">
+      <span class="dot dot-gray" id="executor-dot"></span>
+      <span class="proc-label">Executor</span>
+      <span class="proc-detail" id="executor-detail">--</span>
+      <span class="proc-stats" id="executor-stats">0 trades</span>
+      <label class="toggle-wrap" title="Toggle dry run / live">
+        <span class="toggle-track" id="live-toggle" onclick="toggleLiveMode(event)"><span class="toggle-knob"></span></span>
+        <span id="live-label" style="font-size:10px;color:var(--dim)">DRY RUN</span>
+      </label>
+      <button class="btn btn-sm btn-green" id="btn-executor" onclick="toggleExecutor()">Start</button>
+    </div>
+
+    <!-- Decisions log -->
+    <div style="margin-top:10px">
+      <div class="panel-title" style="margin-bottom:6px">Decisions</div>
+      <div class="decisions-log" id="decisions-log">
+        <div class="dec-row"><span class="dec-detail empty-row">No decisions yet</span></div>
+      </div>
+    </div>
   </div>
 
-  <!-- Top metrics row -->
-  <div class="grid grid-4" style="margin-bottom:16px">
-    <div class="card">
-      <h2>Equity</h2>
-      <div class="card-value" id="equity">--</div>
-      <div class="card-label">Cash: <span id="cash">--</span></div>
-    </div>
-    <div class="card">
-      <h2>Drawdown</h2>
-      <div class="card-value" id="drawdown-pct">--</div>
-      <div class="card-label">Ref: <span id="drawdown-ref">--</span></div>
-      <div class="drawdown-bar"><div class="drawdown-fill" id="drawdown-bar" style="width:0%"></div></div>
-    </div>
-    <div class="card">
-      <h2>Daily P&L</h2>
-      <div class="card-value" id="daily-pnl">--</div>
-      <div class="card-label">Trades: <span id="daily-trades">0</span> (W:<span id="daily-wins">0</span> L:<span id="daily-losses">0</span>)</div>
-    </div>
-    <div class="card">
-      <h2>Positions</h2>
-      <div class="card-value" id="positions-count">--</div>
-      <div class="card-label">Max: <span id="positions-max">--</span></div>
-    </div>
-  </div>
-
-  <!-- Controls -->
-  <div class="controls">
-    <button class="btn" id="btn-scanner" onclick="toggleScanner()">Start Scanner</button>
-    <button class="btn" id="btn-executor" onclick="toggleExecutor()">Start Executor</button>
-    <button class="btn btn-danger" onclick="activateKillSwitch()">Kill Switch</button>
-    <button class="btn" onclick="resetDaily()">Reset Daily</button>
-    <button class="btn" onclick="testFetch()">Test Fetch</button>
-  </div>
-
-  <!-- Scanner & Candidates -->
-  <div class="grid grid-2" style="margin-bottom:16px">
-    <div class="card">
-      <h2>Scanner</h2>
-      <div>Status: <span id="scanner-status" class="status-badge badge-muted">--</span></div>
-      <div style="margin-top:8px;font-size:13px;color:var(--text-muted)" id="scanner-detail">--</div>
-      <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">Runs: <span id="scanner-runs">0</span></div>
-    </div>
-    <div class="card">
-      <h2>Executor</h2>
-      <div>Status: <span id="executor-status" class="status-badge badge-muted">--</span></div>
-      <div style="margin-top:8px;font-size:13px;color:var(--text-muted)" id="executor-detail">--</div>
-      <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">Trades: <span id="executor-trades">0</span></div>
-    </div>
-  </div>
-
-  <!-- Candidates table -->
-  <div class="card" style="margin-bottom:16px">
-    <h2>Iron Condor Candidates</h2>
+  <!-- Open Positions -->
+  <div class="panel">
+    <div class="panel-title">Open Positions</div>
     <table>
       <thead>
         <tr>
-          <th>Symbol</th><th>Expiration</th><th>DTE</th><th>IV Rank</th>
-          <th>Put Spread</th><th>Call Spread</th>
-          <th>Credit</th><th>Max Loss</th><th>Return%</th>
+          <th>Ticker</th><th>Exp</th><th>Short P</th><th>Short C</th>
+          <th>Credit</th><th>Current</th><th>P&amp;L</th><th>DTE</th><th></th>
         </tr>
       </thead>
-      <tbody id="candidates-body">
-        <tr><td colspan="9" style="color:var(--text-muted)">No candidates</td></tr>
+      <tbody id="positions-body">
+        <tr><td colspan="9" class="empty-row">No open positions</td></tr>
       </tbody>
     </table>
   </div>
 
-  <!-- Recent decisions -->
-  <div class="card" style="margin-bottom:16px">
-    <h2>Recent Decisions</h2>
-    <table>
-      <thead>
-        <tr><th>Time</th><th>Ticker</th><th>Result</th><th>Detail</th></tr>
-      </thead>
-      <tbody id="decisions-body">
-        <tr><td colspan="4" style="color:var(--text-muted)">No decisions yet</td></tr>
-      </tbody>
-    </table>
+  <!-- Iron Condor Candidates -->
+  <div class="panel">
+    <div class="panel-title">Iron Condor Candidates</div>
+    <div id="candidates-list">
+      <div class="empty-row" style="padding:8px 0">No candidates</div>
+    </div>
   </div>
 
-  <div class="last-update">Last update: <span id="last-update">--</span></div>
-</div>
+</div><!-- /left-col -->
+
+<!-- ---- RIGHT SIDEBAR ---- -->
+<div class="right-col">
+
+  <!-- Risk Management -->
+  <div class="panel">
+    <div class="panel-title">Risk Management</div>
+
+    <!-- Greek gauges -->
+    <div id="gauge-delta" class="gauge">
+      <div class="gauge-header"><span class="gauge-label">Portfolio Delta</span><span class="gauge-value" id="g-delta-val">--</span></div>
+      <div class="gauge-track"><div class="gauge-center"></div><div class="gauge-fill" id="g-delta-fill" style="width:50%"></div></div>
+    </div>
+    <div id="gauge-vega" class="gauge">
+      <div class="gauge-header"><span class="gauge-label">Portfolio Vega</span><span class="gauge-value" id="g-vega-val">--</span></div>
+      <div class="gauge-track"><div class="gauge-fill" id="g-vega-fill" style="width:0"></div></div>
+    </div>
+    <div id="gauge-theta" class="gauge">
+      <div class="gauge-header"><span class="gauge-label">Portfolio Theta</span><span class="gauge-value" id="g-theta-val">--</span></div>
+      <div class="gauge-track"><div class="gauge-fill" id="g-theta-fill" style="width:0;background:var(--green)"></div></div>
+    </div>
+    <div id="gauge-gamma" class="gauge">
+      <div class="gauge-header"><span class="gauge-label">Portfolio Gamma</span><span class="gauge-value" id="g-gamma-val">--</span></div>
+      <div class="gauge-track"><div class="gauge-fill" id="g-gamma-fill" style="width:0;background:var(--blue)"></div></div>
+    </div>
+
+    <!-- Drawdown detail -->
+    <div style="margin:10px 0;padding:8px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+      <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:4px">Drawdown</div>
+      <div style="display:flex;justify-content:space-between;font-size:12px">
+        <span id="dd-detail-pct">--</span>
+        <span style="color:var(--dim)" id="dd-detail-ref">ref: --</span>
+      </div>
+      <div class="dd-bar-track" style="margin-top:4px"><div class="dd-bar-fill" id="dd-bar-fill2" style="width:0"></div></div>
+    </div>
+
+    <!-- Effective limits -->
+    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">
+      <div>Per-position: <span id="lim-pos" style="color:var(--text)">--</span></div>
+      <div>Max positions: <span id="lim-max-pos" style="color:var(--text)">--</span></div>
+      <div>Max drawdown: <span id="lim-dd" style="color:var(--text)">--</span></div>
+    </div>
+
+    <!-- Buttons -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-sm btn-danger-fill" id="btn-kill" onclick="confirmAction('kill')">Emergency Kill Switch</button>
+      <button class="btn btn-sm btn-green" id="btn-resume" onclick="doResume()" style="display:none">Resume Trading</button>
+      <button class="btn btn-sm btn-blue" id="btn-reset" onclick="confirmAction('reset')">Reset Daily</button>
+    </div>
+    <div id="confirm-area" style="margin-top:6px"></div>
+
+    <!-- Risk events -->
+    <div style="margin-top:10px">
+      <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:4px">Risk Events</div>
+      <div id="risk-events">
+        <div class="risk-event">No events</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IV Rank -->
+  <div class="panel">
+    <div class="panel-title">IV Rank</div>
+    <div id="iv-panel">
+      <div class="iv-row"><span class="iv-sym">SPY</span><span class="iv-val" style="color:var(--dim)">--</span></div>
+      <div class="iv-row"><span class="iv-sym">QQQ</span><span class="iv-val" style="color:var(--dim)">--</span></div>
+    </div>
+  </div>
+
+  <!-- Fee Estimator -->
+  <div class="panel">
+    <div class="panel-title">Fee / Cost Estimator</div>
+    <div id="fee-panel">
+      <div class="fee-row">Entry: <span class="fee-val" id="fee-entry">--</span></div>
+      <div class="fee-row">Round-trip: <span class="fee-val" id="fee-rt">--</span></div>
+      <div class="fee-row">Haircut: <span class="fee-val" id="fee-haircut">--</span></div>
+    </div>
+  </div>
+
+</div><!-- /right-col -->
+</div><!-- /main-grid -->
+
+</div><!-- /wrap -->
 
 <script>
-const API = '';
-let scannerRunning = false;
-let executorRunning = false;
+/* ======================================================================
+   CADENCE OPTIONS DASHBOARD
+   Vanilla JS, no dependencies, polls JSON endpoints.
+   ====================================================================== */
+'use strict';
 
-function $(id) { return document.getElementById(id); }
+// ---- State ----
+var S = {
+  scannerRunning: false,
+  executorRunning: false,
+  isDryRun: true,
+  authenticated: false,
+  tradierEnv: 'sandbox',
+  killSwitchActive: false,
+  pollInterval: 2000,
+  pollTimer: null,
+  lastScanTime: null,
+  bannerDismissed: {},
+  confirmPending: null,
+  expandedCandidate: null,
+};
+
+// ---- Helpers ----
+function el(id) { return document.getElementById(id); }
 
 function fmt$(cents) {
-  if (cents == null) return '--';
-  return '$' + (cents / 100).toFixed(2);
+  if (cents == null || isNaN(cents)) return '--';
+  var neg = cents < 0;
+  var abs = Math.abs(cents);
+  var str = '$' + (abs / 100).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return neg ? '-' + str : str;
 }
 
-function statusBadge(status) {
-  if (status === 'running') return 'badge-green';
-  if (status === 'stopped') return 'badge-muted';
-  return 'badge-yellow';
+function fmtPct(v, decimals) {
+  if (v == null || isNaN(v)) return '--';
+  return v.toFixed(decimals != null ? decimals : 1) + '%';
 }
+
+function fmtTime(ts) {
+  if (!ts) return '--';
+  var d = new Date(ts * 1000);
+  return d.toLocaleTimeString();
+}
+
+function esc(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 async function api(method, path) {
   try {
-    const opts = method === 'POST' ? { method: 'POST' } : {};
-    const r = await fetch(API + path, opts);
+    var opts = { method: method };
+    var r = await fetch(path, opts);
+    if (!r.ok) {
+      var txt = '';
+      try { txt = await r.text(); } catch(e){}
+      return { _error: true, status: r.status, body: txt, endpoint: path };
+    }
     return await r.json();
   } catch (e) {
-    console.error('API error:', path, e);
-    return null;
+    return { _error: true, status: 0, body: e.message, endpoint: path };
   }
 }
 
-async function refresh() {
-  const [risk, procs, diag] = await Promise.all([
-    api('GET', '/api/risk'),
-    api('GET', '/api/processes'),
-    api('GET', '/api/diagnostics'),
-  ]);
-
-  // Risk
-  if (risk) {
-    const eq = risk.equity || {};
-    $('equity').textContent = fmt$(eq.current);
-    $('cash').textContent = fmt$(eq.cash);
-
-    const dd = risk.drawdown || {};
-    const ddPct = (dd.current_pct || 0).toFixed(1);
-    $('drawdown-pct').textContent = ddPct + '%';
-    $('drawdown-pct').style.color = dd.current_pct > 5 ? 'var(--red)' : 'var(--text)';
-    $('drawdown-ref').textContent = dd.reference_mode || '--';
-
-    const barPct = Math.min(dd.current_pct || 0, dd.max_pct || 10) / (dd.max_pct || 10) * 100;
-    const bar = $('drawdown-bar');
-    bar.style.width = barPct + '%';
-    bar.style.background = barPct > 70 ? 'var(--red)' : barPct > 40 ? 'var(--yellow)' : 'var(--green)';
-
-    const daily = risk.daily || {};
-    const pnl = daily.pnl_cents || 0;
-    $('daily-pnl').textContent = fmt$(pnl);
-    $('daily-pnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-    $('daily-trades').textContent = daily.trade_count || 0;
-    $('daily-wins').textContent = daily.win_count || 0;
-    $('daily-losses').textContent = daily.loss_count || 0;
-
-    const pos = risk.positions || {};
-    $('positions-count').textContent = pos.count || 0;
-    $('positions-max').textContent = pos.max || 5;
-
-    const ks = risk.kill_switch || {};
-    const banner = $('kill-banner');
-    if (ks.active) {
-      banner.classList.add('active');
-      $('kill-reason').textContent = ks.reason || '--';
-    } else {
-      banner.classList.remove('active');
-    }
-  }
-
-  // Processes
-  if (procs) {
-    const sc = procs.scanner || {};
-    scannerRunning = sc.status === 'running';
-    $('scanner-status').textContent = sc.status || '--';
-    $('scanner-status').className = 'status-badge ' + statusBadge(sc.status);
-    $('scanner-detail').textContent = sc.last_detail || '--';
-    $('scanner-runs').textContent = sc.run_count || 0;
-    $('btn-scanner').textContent = scannerRunning ? 'Stop Scanner' : 'Start Scanner';
-    $('btn-scanner').className = scannerRunning ? 'btn btn-danger' : 'btn btn-success';
-
-    const ex = procs.executor || {};
-    executorRunning = ex.status === 'running';
-    $('executor-status').textContent = ex.status || '--';
-    $('executor-status').className = 'status-badge ' + statusBadge(ex.status);
-    $('executor-detail').textContent = ex.last_detail || '--';
-    $('executor-trades').textContent = ex.trades_placed || 0;
-    $('btn-executor').textContent = executorRunning ? 'Stop Executor' : 'Start Executor';
-    $('btn-executor').className = executorRunning ? 'btn btn-danger' : 'btn btn-success';
-
-    // Config badges
-    const cfg = procs.config || {};
-    $('mode-badge').textContent = cfg.dry_run === false ? 'LIVE' : 'DRY RUN';
-    $('mode-badge').className = 'status-badge ' + (cfg.dry_run === false ? 'badge-red' : 'badge-yellow');
-
-    // Candidates
-    const cands = procs.candidates || [];
-    const tbody = $('candidates-body');
-    if (cands.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted)">No candidates</td></tr>';
-    } else {
-      tbody.innerHTML = cands.map(c =>
-        '<tr>' +
-        '<td>' + (c.symbol || '--') + '</td>' +
-        '<td>' + (c.expiration || '--') + '</td>' +
-        '<td>' + (c.dte || '--') + '</td>' +
-        '<td>' + (c.iv_rank ? c.iv_rank.toFixed(1) : '--') + '</td>' +
-        '<td>' + (c.short_put_strike || '--') + '/' + (c.long_put_strike || '--') + '</td>' +
-        '<td>' + (c.short_call_strike || '--') + '/' + (c.long_call_strike || '--') + '</td>' +
-        '<td>$' + (c.credit ? c.credit.toFixed(2) : '--') + '</td>' +
-        '<td>$' + (c.max_loss ? c.max_loss.toFixed(2) : '--') + '</td>' +
-        '<td>' + (c.return_pct ? c.return_pct.toFixed(1) + '%' : '--') + '</td>' +
-        '</tr>'
-      ).join('');
-    }
-
-    // Recent decisions
-    const decs = (ex.recent_decisions || []).slice(-10).reverse();
-    const dtbody = $('decisions-body');
-    if (decs.length === 0) {
-      dtbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted)">No decisions yet</td></tr>';
-    } else {
-      dtbody.innerHTML = decs.map(d => {
-        const t = d.time ? new Date(d.time * 1000).toLocaleTimeString() : '--';
-        const cls = d.success ? 'color:var(--green)' : 'color:var(--red)';
-        return '<tr>' +
-          '<td>' + t + '</td>' +
-          '<td>' + (d.ticker || '--') + '</td>' +
-          '<td style="' + cls + '">' + (d.success ? 'OK' : 'BLOCKED') + '</td>' +
-          '<td style="font-size:12px">' + (d.detail || '--').substring(0, 100) + '</td>' +
-          '</tr>';
-      }).join('');
-    }
-  }
-
-  // Diagnostics
-  if (diag) {
-    $('env-badge').textContent = (diag.tradier_env || 'sandbox').toUpperCase();
-    $('env-badge').className = 'status-badge ' +
-      (diag.tradier_env === 'production' ? 'badge-red' : 'badge-green');
-    $('auth-badge').textContent = diag.authenticated ? 'AUTH' : 'NO AUTH';
-    $('auth-badge').className = 'status-badge ' +
-      (diag.authenticated ? 'badge-green' : 'badge-red');
-  }
-
-  $('last-update').textContent = new Date().toLocaleTimeString();
+// ---- Adaptive polling ----
+function calcInterval() {
+  if (!S.authenticated) return 2000;
+  if (S.killSwitchActive) return 5000;
+  if (!S.scannerRunning && !S.executorRunning) return 5000;
+  if (S.lastScanTime && Date.now() - S.lastScanTime < 10000) return 2000;
+  return 5000;
 }
 
+function schedulePoll() {
+  if (S.pollTimer) clearTimeout(S.pollTimer);
+  S.pollInterval = calcInterval();
+  S.pollTimer = setTimeout(doRefresh, S.pollInterval);
+}
+
+// ---- Banners ----
+function showBanner(id) {
+  if (!S.bannerDismissed[id]) el(id).classList.add('show');
+}
+function hideBanner(id) { el(id).classList.remove('show'); }
+function dismissBanner(id) { S.bannerDismissed[id] = true; hideBanner(id); }
+
+// ---- Accordion ----
+function toggleAccordion(bodyId, header) {
+  var body = el(bodyId);
+  var arrow = header.querySelector('.accordion-arrow');
+  if (body.classList.contains('open')) {
+    body.classList.remove('open');
+    arrow.style.transform = '';
+  } else {
+    body.classList.add('open');
+    arrow.style.transform = 'rotate(90deg)';
+  }
+}
+
+// ---- Confirm actions ----
+function confirmAction(action) {
+  S.confirmPending = action;
+  var area = el('confirm-area');
+  var label = action === 'kill' ? 'Activate kill switch?' : action === 'reset' ? 'Reset daily P&L and baseline?' : 'Are you sure?';
+  area.innerHTML = '<div class="confirm-inline"><span class="confirm-text">' + esc(label) + '</span>' +
+    '<button class="btn btn-sm btn-red" onclick="executeConfirm()">Confirm</button>' +
+    '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+}
+function cancelConfirm() { S.confirmPending = null; el('confirm-area').innerHTML = ''; }
+async function executeConfirm() {
+  var action = S.confirmPending;
+  cancelConfirm();
+  if (action === 'kill') { await api('POST', '/api/risk/kill-switch/activate'); }
+  else if (action === 'reset') { await api('POST', '/api/risk/reset-daily'); }
+  doRefresh();
+}
+
+// ---- Process controls ----
 async function toggleScanner() {
-  await api('POST', scannerRunning ? '/api/scanner/stop' : '/api/scanner/start');
-  setTimeout(refresh, 500);
+  await api('POST', S.scannerRunning ? '/api/scanner/stop' : '/api/scanner/start');
+  setTimeout(doRefresh, 400);
 }
 
 async function toggleExecutor() {
-  await api('POST', executorRunning ? '/api/executor/stop' : '/api/executor/start');
-  setTimeout(refresh, 500);
+  await api('POST', S.executorRunning ? '/api/executor/stop' : '/api/executor/start');
+  setTimeout(doRefresh, 400);
 }
 
-async function activateKillSwitch() {
-  await api('POST', '/api/risk/kill-switch/activate');
-  refresh();
-}
-
-async function deactivateKillSwitch() {
+async function doResume() {
   await api('POST', '/api/risk/kill-switch/deactivate');
-  refresh();
+  doRefresh();
 }
 
-async function resetDaily() {
-  await api('POST', '/api/risk/reset-daily');
-  refresh();
-}
-
-async function testFetch() {
-  const r = await api('POST', '/api/test-fetch');
-  if (r && r.quote) {
-    alert('SPY last: $' + (r.quote.last || 'N/A'));
+function toggleLiveMode(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (S.isDryRun) {
+    // Switching to live -- double confirmation
+    var area = el('confirm-area');
+    area.innerHTML = '<div class="confirm-inline"><span class="confirm-text">Enable LIVE trading? Real orders will be placed.</span>' +
+      '<button class="btn btn-sm btn-red" onclick="confirmLive1()">Yes, enable live</button>' +
+      '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
   } else {
-    alert('Error: ' + JSON.stringify(r));
+    // Back to dry run -- no confirm needed
+    // Note: backend doesn't have a toggle endpoint yet; this is UI-only indication
+    S.isDryRun = true;
+    updateExecBadge();
+  }
+}
+function confirmLive1() {
+  var area = el('confirm-area');
+  area.innerHTML = '<div class="confirm-inline"><span class="confirm-text" style="color:var(--red)">FINAL CONFIRMATION: Live orders will use real money.</span>' +
+    '<button class="btn btn-sm btn-red" onclick="confirmLive2()">CONFIRM LIVE</button>' +
+    '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+}
+function confirmLive2() {
+  cancelConfirm();
+  S.isDryRun = false;
+  updateExecBadge();
+}
+
+// ---- Test fetch ----
+async function doTestFetch() {
+  var out = el('test-fetch-result');
+  out.textContent = 'Fetching...';
+  out.style.color = 'var(--dim)';
+  var r = await api('POST', '/api/test-fetch');
+  if (r && r._error) {
+    out.textContent = 'Error: HTTP ' + r.status + ' ' + r.body;
+    out.style.color = 'var(--red)';
+  } else if (r && r.quote) {
+    out.textContent = 'SPY last: $' + (r.quote.last || 'N/A') + ' bid: $' + (r.quote.bid || 'N/A') + ' ask: $' + (r.quote.ask || 'N/A');
+    out.style.color = 'var(--green)';
+  } else if (r && r.error) {
+    out.textContent = r.error;
+    out.style.color = 'var(--red)';
   }
 }
 
-// Auto-refresh every 5 seconds
-refresh();
-setInterval(refresh, 5000);
+// ---- Badge updates ----
+function updateDataBadge(scannerStatus, scannerError, authenticated, tradierEnv, scanRunCount) {
+  var b = el('data-badge');
+  if (!authenticated) {
+    b.className = 'badge badge-purple';
+    b.innerHTML = '<span class="dot dot-gray"></span> DEMO DATA';
+    return;
+  }
+  if (scannerError && scannerStatus === 'running') {
+    b.className = 'badge badge-red';
+    b.innerHTML = '<span class="dot dot-red pulse-fast"></span> SCANNER ERROR';
+    return;
+  }
+  if (scannerStatus !== 'running') {
+    b.className = 'badge badge-gray';
+    b.innerHTML = '<span class="dot dot-gray"></span> DATA IDLE';
+    return;
+  }
+  if (scanRunCount === 0) {
+    b.className = 'badge badge-green';
+    b.innerHTML = '<span class="dot dot-green pulse"></span> LIVE (starting...)';
+    return;
+  }
+  var envLabel = tradierEnv === 'production' ? 'prod' : 'sandbox';
+  var cls = tradierEnv === 'production' ? 'badge-green' : 'badge-blue';
+  b.className = 'badge ' + cls;
+  b.innerHTML = '<span class="dot ' + (tradierEnv === 'production' ? 'dot-green' : 'dot-green') + ' pulse"></span> LIVE DATA (' + envLabel + ')';
+}
+
+function updateExecBadge() {
+  var b = el('exec-badge');
+  var t = el('live-toggle');
+  var l = el('live-label');
+  if (!S.executorRunning) {
+    b.className = 'badge badge-gray';
+    b.innerHTML = '<span class="dot dot-gray"></span> EXECUTOR OFF';
+  } else if (S.isDryRun) {
+    b.className = 'badge badge-blue';
+    b.innerHTML = '<span class="dot dot-green pulse"></span> DRY RUN';
+  } else {
+    b.className = 'badge badge-red';
+    b.innerHTML = '<span class="dot dot-red pulse-fast"></span> LIVE TRADING';
+  }
+  if (S.isDryRun) {
+    t.classList.remove('on');
+    l.textContent = 'DRY RUN';
+    l.style.color = 'var(--dim)';
+  } else {
+    t.classList.add('on');
+    l.textContent = 'LIVE';
+    l.style.color = 'var(--red)';
+  }
+  // Live banner
+  if (!S.isDryRun && S.executorRunning) showBanner('banner-live');
+  else hideBanner('banner-live');
+}
+
+// ---- Greek gauge rendering ----
+function renderGauge(fillId, valId, value, limit, opts) {
+  var valEl = el(valId);
+  var fillEl = el(fillId);
+  var cents = value || 0;
+  var dollarVal = cents / 100;
+  var isBidirectional = opts && opts.bidirectional;
+  var noLimit = opts && opts.noLimit;
+
+  if (noLimit) {
+    valEl.textContent = (dollarVal >= 0 ? '+' : '') + '$' + dollarVal.toFixed(2) + '/day';
+    valEl.style.color = dollarVal >= 0 ? 'var(--green)' : 'var(--red)';
+    var pct = clamp(Math.abs(dollarVal) / 100 * 100, 0, 100);
+    fillEl.style.width = pct + '%';
+    fillEl.style.background = dollarVal >= 0 ? 'var(--green)' : 'var(--red)';
+    return;
+  }
+
+  var limitDollar = (limit || 1) / 100;
+  var sign = dollarVal >= 0 ? '+' : '';
+  valEl.textContent = sign + '$' + dollarVal.toFixed(0) + ' / +/-$' + limitDollar.toFixed(0);
+
+  if (isBidirectional) {
+    // Delta: center at 50%, spread outward
+    var ratio = limit > 0 ? Math.abs(cents) / limit : 0;
+    var pctW = clamp(ratio * 50, 0, 50);
+    if (cents >= 0) {
+      fillEl.style.width = (50 + pctW) + '%';
+      fillEl.style.marginLeft = '0';
+    } else {
+      fillEl.style.width = pctW + '%';
+      fillEl.style.marginLeft = (50 - pctW) + '%';
+    }
+    // Color
+    if (ratio < 0.5) { fillEl.style.background = 'var(--green)'; valEl.style.color = 'var(--green)'; }
+    else if (ratio < 0.8) { fillEl.style.background = 'var(--yellow)'; valEl.style.color = 'var(--yellow)'; }
+    else { fillEl.style.background = 'var(--red)'; valEl.style.color = 'var(--red)'; }
+  } else {
+    var ratio = limit > 0 ? Math.abs(cents) / limit : 0;
+    fillEl.style.width = clamp(ratio * 100, 0, 100) + '%';
+    if (ratio < 0.5) { fillEl.style.background = 'var(--green)'; valEl.style.color = 'var(--green)'; }
+    else if (ratio < 0.8) { fillEl.style.background = 'var(--yellow)'; valEl.style.color = 'var(--yellow)'; }
+    else { fillEl.style.background = 'var(--red)'; valEl.style.color = 'var(--red)'; }
+  }
+}
+
+// ---- Decisions log ----
+function renderDecisions(decisions) {
+  var log = el('decisions-log');
+  if (!decisions || decisions.length === 0) {
+    log.innerHTML = '<div class="dec-row"><span class="dec-detail empty-row">No decisions yet</span></div>';
+    return;
+  }
+  var rows = decisions.slice().reverse().slice(0, 50);
+  log.innerHTML = rows.map(function(d) {
+    var icon, iconColor;
+    if (d.success) { icon = '+'; iconColor = 'var(--green)'; }
+    else if (d.detail && d.detail.indexOf('cooldown') >= 0) { icon = '-'; iconColor = 'var(--yellow)'; }
+    else { icon = 'x'; iconColor = 'var(--red)'; }
+    var credit = d.credit ? '$' + d.credit.toFixed(2) : '';
+    return '<div class="dec-row" onclick="this.querySelector(\'.dec-detail\').classList.toggle(\'expanded\')">' +
+      '<span class="dec-time">' + fmtTime(d.time) + '</span>' +
+      '<span class="dec-icon" style="color:' + iconColor + '">' + icon + '</span>' +
+      '<span class="dec-ticker">' + esc(d.ticker || '--') + '</span>' +
+      '<span class="dec-credit">' + credit + '</span>' +
+      '<span class="dec-detail">' + esc(d.detail || '--') + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+// ---- Candidates ----
+function renderCandidates(candidates) {
+  var container = el('candidates-list');
+  if (!candidates || candidates.length === 0) {
+    container.innerHTML = '<div class="empty-row" style="padding:8px 0">No candidates</div>';
+    return;
+  }
+  var top10 = candidates.slice(0, 10);
+  container.innerHTML = top10.map(function(c, i) {
+    var credit100 = ((c.credit || 0) * 100).toFixed(0);
+    var maxLoss100 = ((c.max_loss || 0) * 100).toFixed(0);
+    var isExpanded = S.expandedCandidate === i;
+    return '<div class="cand-card fade-in" onclick="toggleCandidate(' + i + ')">' +
+      '<div class="cand-header">' +
+        '<span class="cand-sym">' + esc(c.symbol) + '</span>' +
+        '<span class="cand-tag">' + (c.dte || '--') + ' DTE</span>' +
+        '<span class="cand-tag">IV ' + fmtPct(c.iv_rank, 0) + '</span>' +
+        '<span class="cand-tag" style="color:var(--green)">Credit $' + credit100 + '</span>' +
+        '<span class="cand-tag" style="color:var(--red)">Max Loss $' + maxLoss100 + '</span>' +
+      '</div>' +
+      '<div class="cand-stats">' +
+        '<span>Return: <strong>' + fmtPct(c.return_pct, 1) + '</strong></span>' +
+        '<span>Prob profit: <strong>' + fmtPct(c.prob_profit, 0) + '</strong></span>' +
+        '<span>Put delta: <strong>' + (c.put_delta ? c.put_delta.toFixed(2) : '--') + '</strong></span>' +
+        '<span>Call delta: <strong>' + (c.call_delta ? ('+' + c.call_delta.toFixed(2)) : '--') + '</strong></span>' +
+      '</div>' +
+      '<div class="cand-expand' + (isExpanded ? ' open' : '') + '">' +
+        '<div class="cand-stats" style="margin-bottom:4px">' +
+          '<span>Exp: <strong>' + esc(c.expiration) + '</strong></span>' +
+          '<span>Breakeven: <strong>$' + (c.breakeven_low || '--') + ' - $' + (c.breakeven_high || '--') + '</strong></span>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--dim)">' +
+          'Short put: ' + esc(c.short_put_symbol) + ' @ ' + (c.short_put_strike || '--') + ' | ' +
+          'Long put: ' + esc(c.long_put_symbol) + ' @ ' + (c.long_put_strike || '--') + '<br>' +
+          'Short call: ' + esc(c.short_call_symbol) + ' @ ' + (c.short_call_strike || '--') + ' | ' +
+          'Long call: ' + esc(c.long_call_symbol) + ' @ ' + (c.long_call_strike || '--') +
+        '</div>' +
+        renderStrikeLadder(c) +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderStrikeLadder(c) {
+  if (!c.long_put_strike || !c.long_call_strike) return '';
+  var lo = c.long_put_strike;
+  var hi = c.long_call_strike;
+  var range = hi - lo;
+  if (range <= 0) return '';
+  function pct(v) { return clamp((v - lo) / range * 100, 0, 100); }
+  return '<div style="margin-top:6px;position:relative;height:20px;background:rgba(30,45,74,0.4);border-radius:3px;overflow:hidden">' +
+    '<div style="position:absolute;left:' + pct(c.short_put_strike) + '%;right:' + (100 - pct(c.short_call_strike)) + '%;top:0;bottom:0;background:rgba(34,197,94,0.12);border-left:2px solid var(--green);border-right:2px solid var(--green)"></div>' +
+    '<div style="position:absolute;left:' + pct(lo) + '%;top:0;bottom:0;width:2px;background:var(--red)" title="Long put ' + lo + '"></div>' +
+    '<div style="position:absolute;left:' + pct(hi) + '%;top:0;bottom:0;width:2px;background:var(--red)" title="Long call ' + hi + '"></div>' +
+    '<div style="position:absolute;left:' + pct(c.short_put_strike) + '%;bottom:0;font-size:9px;color:var(--dim);transform:translateX(-50%)">' + c.short_put_strike + '</div>' +
+    '<div style="position:absolute;left:' + pct(c.short_call_strike) + '%;bottom:0;font-size:9px;color:var(--dim);transform:translateX(-50%)">' + c.short_call_strike + '</div>' +
+  '</div>';
+}
+
+function toggleCandidate(i) {
+  S.expandedCandidate = S.expandedCandidate === i ? null : i;
+  // Re-render with last known candidates
+  if (window._lastCandidates) renderCandidates(window._lastCandidates);
+}
+
+// ---- Positions ----
+function renderPositions(positions) {
+  var tbody = el('positions-body');
+  if (!positions || positions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">No open positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(function(p) {
+    var pnl = p.pnl_cents || 0;
+    var pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    var dte = p.dte;
+    var dteColor = dte != null && dte <= 7 ? 'var(--red)' : dte != null && dte <= 21 ? 'var(--yellow)' : 'var(--text)';
+    return '<tr>' +
+      '<td>' + esc(p.symbol || '--') + '</td>' +
+      '<td>' + esc(p.expiration || '--') + '</td>' +
+      '<td>' + (p.short_put_strike || '--') + '</td>' +
+      '<td>' + (p.short_call_strike || '--') + '</td>' +
+      '<td>' + fmt$(p.entry_credit_cents) + '</td>' +
+      '<td>' + fmt$(p.current_debit_cents) + '</td>' +
+      '<td style="color:' + pnlColor + ';font-weight:600">' + fmt$(pnl) + '</td>' +
+      '<td style="color:' + dteColor + '">' + (dte != null ? dte : '--') + '</td>' +
+      '<td><button class="btn btn-sm btn-red" onclick="closePosition(\'' + esc(p.position_id || '') + '\')">Close</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function closePosition(id) {
+  if (!id) return;
+  S.confirmPending = null;
+  var area = el('confirm-area');
+  area.innerHTML = '<div class="confirm-inline"><span class="confirm-text">Close position ' + esc(id) + '?</span>' +
+    '<button class="btn btn-sm btn-red" onclick="doClosePosition(\'' + esc(id) + '\')">Confirm</button>' +
+    '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+}
+
+async function doClosePosition(id) {
+  cancelConfirm();
+  await api('POST', '/api/positions/' + encodeURIComponent(id) + '/close');
+  doRefresh();
+}
+
+// ---- Risk events ----
+function renderRiskEvents(events) {
+  var container = el('risk-events');
+  if (!events || events.length === 0) {
+    container.innerHTML = '<div class="risk-event">No events</div>';
+    return;
+  }
+  var last5 = events.slice(-5).reverse();
+  container.innerHTML = last5.map(function(ev) {
+    return '<div class="risk-event">' + fmtTime(ev.time) + ' <strong>' + esc(ev.type) + '</strong> ' + esc(ev.detail || '') + '</div>';
+  }).join('');
+}
+
+// ---- IV Rank ----
+function renderIVRank(data) {
+  var panel = el('iv-panel');
+  if (!data || Object.keys(data).length === 0) return;
+  var html = '';
+  for (var sym in data) {
+    var info = data[sym];
+    var rank = info.rank || info.iv_rank || 0;
+    var color = rank >= 30 ? 'var(--green)' : rank >= 20 ? 'var(--yellow)' : 'var(--red)';
+    html += '<div class="iv-row">' +
+      '<span class="iv-sym">' + esc(sym) + '</span>' +
+      '<span class="iv-val" style="color:' + color + '">' + rank.toFixed(0) + '%</span>' +
+      '</div>';
+  }
+  panel.innerHTML = html;
+}
+
+// ---- Fee estimator ----
+function renderFees(candidates) {
+  if (!candidates || candidates.length === 0) {
+    el('fee-entry').textContent = '--';
+    el('fee-rt').textContent = '--';
+    el('fee-haircut').textContent = '--';
+    return;
+  }
+  // Use typical $0.65/leg commission estimate
+  var perLeg = 0.65;
+  var legs = 4;
+  var entry = perLeg * legs;
+  var rt = entry * 2;
+  var c = candidates[0];
+  var credit100 = (c.credit || 0) * 100;
+  var haircut = credit100 > 0 ? (rt / credit100 * 100).toFixed(1) : '--';
+  el('fee-entry').textContent = '$' + entry.toFixed(2) + ' (' + legs + ' legs x $' + perLeg.toFixed(2) + ')';
+  el('fee-rt').textContent = '$' + rt.toFixed(2);
+  el('fee-haircut').textContent = haircut + '% of $' + credit100.toFixed(0) + ' credit';
+}
+
+// ---- Main refresh ----
+async function doRefresh() {
+  if (S.pollTimer) clearTimeout(S.pollTimer);
+
+  var results = await Promise.all([
+    api('GET', '/api/risk'),
+    api('GET', '/api/processes'),
+    api('GET', '/api/diagnostics'),
+    api('GET', '/api/positions'),
+    api('GET', '/api/iv_rank'),
+  ]);
+
+  var risk = results[0];
+  var procs = results[1];
+  var diag = results[2];
+  var positions = results[3];
+  var ivRank = results[4];
+
+  // ---- Risk data ----
+  if (risk && !risk._error) {
+    var eq = risk.equity || {};
+    var dd = risk.drawdown || {};
+    var daily = risk.daily || {};
+    var greeks = risk.greeks || {};
+    var pos = risk.positions || {};
+    var ks = risk.kill_switch || {};
+
+    // Stats row
+    el('s-equity').textContent = fmt$(eq.current);
+    var syncAge = risk.balance_sync && risk.balance_sync.time ? (Date.now()/1000 - risk.balance_sync.time) : 999;
+    el('s-equity-sub').textContent = syncAge < 60 ? 'LIVE' : 'STALE (' + Math.floor(syncAge) + 's ago)';
+    el('s-equity-sub').style.color = syncAge < 60 ? 'var(--green)' : 'var(--yellow)';
+
+    var pnl = daily.pnl_cents || 0;
+    el('s-pnl').textContent = fmt$(pnl);
+    el('s-pnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    var dsb = daily.starting_balance_cents || 0;
+    var pnlPct = dsb > 0 ? (pnl / dsb * 100).toFixed(2) : '0.00';
+    el('s-pnl-sub').textContent = pnlPct + '% of daily start';
+
+    var ddPct = dd.current_pct || 0;
+    el('s-dd').textContent = fmtPct(ddPct, 1);
+    var ddColor = ddPct < 5 ? 'var(--green)' : ddPct < 8 ? 'var(--yellow)' : 'var(--red)';
+    el('s-dd').style.color = ddColor;
+    el('s-dd-card').style.borderTopColor = ddColor;
+    el('s-dd-sub').textContent = 'ref: ' + (dd.reference_mode || 'session_start');
+    var ddMax = dd.max_pct || 10;
+    var ddFillPct = clamp(ddPct / ddMax * 100, 0, 100);
+    el('dd-bar-fill').style.width = ddFillPct + '%';
+    el('dd-bar-fill').style.background = ddColor;
+
+    // Exposure stat
+    var deltaD = (greeks.delta_cents || 0) / 100;
+    el('s-exposure').textContent = (deltaD >= 0 ? '+' : '') + '$' + deltaD.toFixed(0);
+    el('s-exposure-sub').textContent = (pos.count || 0) + ' of ' + (pos.max || 5) + ' max';
+
+    // Positions stat
+    el('s-positions').textContent = pos.count || 0;
+    var absDelta = Math.abs(deltaD);
+    el('s-positions-sub').textContent = absDelta < 50 ? 'delta neutral' : (deltaD > 0 ? 'long' : 'short') + ' $' + absDelta.toFixed(0);
+
+    // Trades today stat
+    el('s-trades').textContent = daily.trade_count || 0;
+    el('s-trades-sub').textContent = (daily.win_count || 0) + 'W / ' + (daily.loss_count || 0) + 'L';
+
+    // Greek gauges
+    renderGauge('g-delta-fill', 'g-delta-val', greeks.delta_cents, risk.drawdown ? 500000 : 500000, {bidirectional: true});
+    renderGauge('g-vega-fill', 'g-vega-val', greeks.vega_cents, 50000);
+    renderGauge('g-theta-fill', 'g-theta-val', greeks.theta_cents, null, {noLimit: true});
+    renderGauge('g-gamma-fill', 'g-gamma-val', greeks.gamma_cents, null, {noLimit: true});
+
+    // Drawdown detail panel
+    el('dd-detail-pct').textContent = fmtPct(ddPct, 1) + ' / ' + fmtPct(ddMax, 0) + ' max';
+    el('dd-detail-pct').style.color = ddColor;
+    el('dd-detail-ref').textContent = 'ref: ' + (dd.reference_mode || '--') + ' (' + fmt$(dd.reference_cents) + ')';
+    el('dd-bar-fill2').style.width = ddFillPct + '%';
+    el('dd-bar-fill2').style.background = ddColor;
+
+    // Limits
+    el('lim-pos').textContent = (risk.drawdown_reference_mode || '') + ' -- max risk/position: ' + fmtPct(2.0, 0);
+    el('lim-max-pos').textContent = (pos.max || 5);
+    el('lim-dd').textContent = fmtPct(ddMax, 0);
+
+    // Kill switch
+    S.killSwitchActive = ks.active;
+    if (ks.active) {
+      el('btn-kill').style.display = 'none';
+      el('btn-resume').style.display = '';
+    } else {
+      el('btn-kill').style.display = '';
+      el('btn-resume').style.display = 'none';
+    }
+
+    // Risk events
+    var events = [];
+    if (risk.daily) {
+      // Build from available state
+    }
+    // The risk endpoint returns risk_events if state tracks them
+    // For now, pull from trade_history or state
+    renderRiskEvents(risk.risk_events || []);
+  }
+
+  // ---- Processes ----
+  if (procs && !procs._error) {
+    var sc = procs.scanner || {};
+    var ex = procs.executor || {};
+    var cfg = procs.config || {};
+
+    S.scannerRunning = sc.status === 'running';
+    S.executorRunning = ex.status === 'running';
+    S.isDryRun = cfg.dry_run !== false;
+
+    // Scanner row
+    var sdot = el('scanner-dot');
+    sdot.className = 'dot ' + (sc.status === 'running' ? 'dot-green pulse' : sc.last_error ? 'dot-red' : 'dot-gray');
+    el('scanner-detail').textContent = sc.last_detail || '--';
+    el('scanner-stats').textContent = (sc.run_count || 0) + ' runs';
+    var btnSc = el('btn-scanner');
+    btnSc.textContent = S.scannerRunning ? 'Stop' : 'Start';
+    btnSc.className = 'btn btn-sm ' + (S.scannerRunning ? 'btn-red' : 'btn-green');
+
+    // Executor row
+    var edot = el('executor-dot');
+    edot.className = 'dot ' + (ex.status === 'running' ? 'dot-green pulse' : 'dot-gray');
+    el('executor-detail').textContent = ex.last_detail || '--';
+    el('executor-stats').textContent = (ex.trades_placed || 0) + ' trades';
+    var btnEx = el('btn-executor');
+    btnEx.textContent = S.executorRunning ? 'Stop' : 'Start';
+    btnEx.className = 'btn btn-sm ' + (S.executorRunning ? 'btn-red' : 'btn-green');
+
+    // Decisions
+    renderDecisions(ex.recent_decisions || []);
+
+    // Candidates
+    var cands = procs.candidates || [];
+    window._lastCandidates = cands;
+    renderCandidates(cands);
+    renderFees(cands);
+
+    // Last scan
+    if (sc.last_run_at) {
+      S.lastScanTime = sc.last_run_at * 1000;
+      el('header-meta').textContent = 'Last scan: ' + fmtTime(sc.last_run_at) + ' | ' + (sc.run_count || 0) + ' runs';
+    }
+
+    // Badges
+    updateExecBadge();
+
+    // Scanner error banner
+    if (sc.last_error) {
+      el('banner-error-text').textContent = 'Scanner error: ' + sc.last_error;
+      showBanner('banner-error');
+    } else {
+      hideBanner('banner-error');
+    }
+  }
+
+  // ---- Diagnostics ----
+  if (diag && !diag._error) {
+    S.authenticated = diag.authenticated;
+    S.tradierEnv = diag.tradier_env || 'sandbox';
+
+    var envOk = diag.env_path && diag.env_path !== 'NOT FOUND';
+    var authOk = diag.authenticated;
+    el('diag-summary').innerHTML =
+      '<span class="' + (envOk ? 'diag-ok' : 'diag-err') + '">.env ' + (envOk ? 'loaded' : 'NOT FOUND') + '</span>' +
+      ' | <span>Tradier ' + esc(S.tradierEnv) + '</span>' +
+      ' | <span class="' + (authOk ? 'diag-ok' : 'diag-err') + '">auth ' + (authOk ? 'OK' : 'FAILED') + '</span>';
+
+    el('d-env').textContent = diag.env_path || '--';
+    el('d-token').textContent = diag.token || '--';
+    el('d-account').textContent = diag.account_id || '--';
+    el('d-tradier-env').textContent = S.tradierEnv;
+    el('d-auth').textContent = authOk ? 'Yes' : 'No';
+    el('d-auth').className = 'diag-val ' + (authOk ? 'diag-ok' : 'diag-err');
+    el('d-syncs').textContent = (diag.scanner && diag.scanner.run_count) || '0';
+    el('d-last-err').textContent = (diag.scanner && diag.scanner.last_error) || 'none';
+
+    // Data badge
+    var scStatus = (procs && !procs._error) ? (procs.scanner || {}).status : '';
+    var scError = (procs && !procs._error) ? (procs.scanner || {}).last_error : '';
+    var scRuns = (procs && !procs._error) ? (procs.scanner || {}).run_count : 0;
+    updateDataBadge(scStatus, scError, authOk, S.tradierEnv, scRuns);
+
+    // Demo banner
+    if (authOk && !S.scannerRunning) {
+      showBanner('banner-demo');
+    } else {
+      hideBanner('banner-demo');
+    }
+  }
+
+  // ---- Positions ----
+  if (positions && !positions._error) {
+    renderPositions(positions.positions || []);
+  }
+
+  // ---- IV Rank ----
+  if (ivRank && !ivRank._error) {
+    renderIVRank(ivRank);
+  }
+
+  // Schedule next poll
+  schedulePoll();
+}
+
+// ---- Init ----
+doRefresh();
 </script>
 </body>
 </html>

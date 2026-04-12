@@ -174,6 +174,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/processes":
             status = _process_ctrl.get_status() if _process_ctrl else {}
+            # Augment config with auth and env info
+            if "config" not in status:
+                status["config"] = {}
+            status["config"]["tradier_env"] = _env("TRADIER_ENV", "sandbox")
+            status["config"]["authenticated"] = _trader.authenticated if _trader else False
             self._send_json(status)
 
         elif path == "/api/iv_rank":

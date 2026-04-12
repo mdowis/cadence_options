@@ -509,7 +509,7 @@ def main():
         if _notifier.commands_enabled:
             _notifier.start_command_listener()
 
-        _notifier.notify_startup(f"env={tradier_env}, auth={_trader.authenticated}")
+        _notifier.notify_startup(detail=f"env={tradier_env}, auth={_trader.authenticated}")
 
     # 6. Auto-start scanner
     if _trader.authenticated and _env_bool("CADENCE_AUTOSTART_SCANNER", True):

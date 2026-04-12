@@ -216,6 +216,27 @@ class TestEventHelpers(unittest.TestCase):
         n.notify_startup(detail="env=sandbox, auth=True")
         time.sleep(0.15)
         self.assertTrue(len(n._test_sent) > 0)
+        self.assertTrue(any("env=sandbox" in m for m in n._test_sent))
+        n.stop()
+
+    def test_notify_startup_positional_string(self):
+        """Regression: first positional arg as string must be treated as
+        detail (not equity_cents). Previously this raised TypeError when
+        the string got divided by 100."""
+        n = _make_notifier()
+        n.notify_startup("env=sandbox, auth=True")  # no keyword
+        time.sleep(0.15)
+        self.assertTrue(any("env=sandbox" in m for m in n._test_sent))
+        n.stop()
+
+    def test_notify_startup_structured_form(self):
+        """The new structured form still works."""
+        n = _make_notifier()
+        n.notify_startup(equity_cents=123456, authenticated=True)
+        time.sleep(0.15)
+        sent = n._test_sent
+        self.assertTrue(any("$1234.56" in m for m in sent))
+        self.assertTrue(any("OK" in m for m in sent))
         n.stop()
 
     def test_notify_scanner_error_deduped(self):

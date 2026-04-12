@@ -141,7 +141,17 @@ class TelegramNotifier:
     # ---- Event helpers ----
 
     def notify_startup(self, equity_cents=None, authenticated=None, detail=None):
-        """Boot notification. Accepts flexible arguments for backward compat."""
+        """Boot notification. Accepts flexible arguments for backward compat.
+
+        If the first positional argument is a string (old call style like
+        notify_startup("env=sandbox, auth=True")), treat it as detail.
+        """
+        # Back-compat: first positional arg as string means detail
+        if isinstance(equity_cents, str):
+            if detail is None:
+                detail = equity_cents
+            equity_cents = None
+
         parts = ["*Cadence Started*"]
         if detail:
             parts.append(_escape_md(str(detail)))
@@ -149,9 +159,6 @@ class TelegramNotifier:
             parts.append("Equity: `${:.2f}`".format(equity_cents / 100))
         if authenticated is not None:
             parts.append("Auth: `{}`".format("OK" if authenticated else "FAILED"))
-        # Support old call style: notify_startup("env=sandbox, auth=True")
-        if equity_cents is None and authenticated is None and detail is None:
-            pass  # just send the header
         self.send("\n".join(parts))
 
     def notify_trade(self, opp_or_detail, success=None, detail=None, contracts=None):

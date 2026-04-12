@@ -11,19 +11,26 @@ from cadence.market_calendar import (
     is_early_close,
     is_us_holiday,
     get_market_close_time,
+    et_offset_hours,
     MARKET_OPEN,
 )
 
 logger = logging.getLogger(__name__)
 
-# US Eastern approximate offset (EST = -5, EDT = -4)
-# Known limitation: DST transitions might be off by ~1 hour
-ET_OFFSET = timedelta(hours=-5)
-
 
 def _now_et():
-    """Approximate Eastern Time from UTC."""
-    return datetime.now(timezone.utc) + ET_OFFSET
+    """Current time in US Eastern, DST-aware.
+
+    Uses the -5h first-pass offset to determine the US calendar date,
+    then looks up whether that date is in DST and applies the correct
+    offset (-4 during EDT, -5 during EST). Correct to the day for all
+    market-hours use cases; only ambiguous during the 1-2am local
+    transition itself, when markets are closed anyway.
+    """
+    utc_now = datetime.now(timezone.utc)
+    approx_date = (utc_now + timedelta(hours=-5)).date()
+    offset = et_offset_hours(approx_date)
+    return (utc_now + timedelta(hours=offset)).replace(tzinfo=None)
 
 
 def is_market_open():

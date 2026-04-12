@@ -15,6 +15,10 @@ from cadence.market_calendar import (
     is_early_close,
     is_trading_day,
     get_market_close_time,
+    dst_start,
+    dst_end,
+    is_us_dst,
+    et_offset_hours,
     _nth_weekday,
     _last_weekday,
     _sunday_observance,
@@ -282,6 +286,118 @@ class TestPublicPredicates(unittest.TestCase):
 
     def test_get_market_close_weekend(self):
         self.assertIsNone(get_market_close_time(date(2026, 4, 4)))
+
+
+class TestDST(unittest.TestCase):
+    """Verify US DST transition dates against published values."""
+
+    def test_dst_start_dates(self):
+        # DST starts 2nd Sunday of March
+        self.assertEqual(dst_start(2024), date(2024, 3, 10))
+        self.assertEqual(dst_start(2025), date(2025, 3, 9))
+        self.assertEqual(dst_start(2026), date(2026, 3, 8))
+        self.assertEqual(dst_start(2027), date(2027, 3, 14))
+        self.assertEqual(dst_start(2028), date(2028, 3, 12))
+
+    def test_dst_end_dates(self):
+        # DST ends 1st Sunday of November
+        self.assertEqual(dst_end(2024), date(2024, 11, 3))
+        self.assertEqual(dst_end(2025), date(2025, 11, 2))
+        self.assertEqual(dst_end(2026), date(2026, 11, 1))
+        self.assertEqual(dst_end(2027), date(2027, 11, 7))
+
+    def test_is_us_dst_midsummer(self):
+        # July is solidly in DST
+        self.assertTrue(is_us_dst(date(2024, 7, 15)))
+        self.assertTrue(is_us_dst(date(2026, 8, 1)))
+
+    def test_is_us_dst_midwinter(self):
+        # January is solidly in EST
+        self.assertFalse(is_us_dst(date(2024, 1, 15)))
+        self.assertFalse(is_us_dst(date(2026, 12, 15)))
+
+    def test_is_us_dst_day_before_start(self):
+        # Day before transition is EST
+        self.assertFalse(is_us_dst(date(2024, 3, 9)))
+        self.assertFalse(is_us_dst(date(2026, 3, 7)))
+
+    def test_is_us_dst_start_day(self):
+        # The start day itself is considered DST (matches the afternoon state)
+        self.assertTrue(is_us_dst(date(2024, 3, 10)))
+        self.assertTrue(is_us_dst(date(2026, 3, 8)))
+
+    def test_is_us_dst_end_day(self):
+        # The end day is considered NOT DST (matches the afternoon state)
+        self.assertFalse(is_us_dst(date(2024, 11, 3)))
+        self.assertFalse(is_us_dst(date(2026, 11, 1)))
+
+    def test_is_us_dst_day_before_end(self):
+        # Saturday before fall-back is still DST
+        self.assertTrue(is_us_dst(date(2024, 11, 2)))
+        self.assertTrue(is_us_dst(date(2026, 10, 31)))
+
+    def test_et_offset_hours_summer(self):
+        self.assertEqual(et_offset_hours(date(2024, 7, 15)), -4)
+
+    def test_et_offset_hours_winter(self):
+        self.assertEqual(et_offset_hours(date(2024, 1, 15)), -5)
+
+
+class TestNowET(unittest.TestCase):
+    """Verify _now_et applies the correct DST-aware offset."""
+
+    def test_summer_uses_minus_4(self):
+        from cadence.process_controller import _now_et
+        from unittest.mock import patch
+        from datetime import datetime as dt, timezone
+        # July 15 2024 at 18:00 UTC -> 14:00 EDT
+        fake_utc = dt(2024, 7, 15, 18, 0, 0, tzinfo=timezone.utc)
+        with patch("cadence.process_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_utc
+            # Keep real datetime for other uses inside the function
+            mock_dt.side_effect = lambda *a, **kw: dt(*a, **kw)
+            result = _now_et()
+        self.assertEqual(result.hour, 14)
+        self.assertEqual(result.minute, 0)
+
+    def test_winter_uses_minus_5(self):
+        from cadence.process_controller import _now_et
+        from unittest.mock import patch
+        from datetime import datetime as dt, timezone
+        # Jan 15 2024 at 18:00 UTC -> 13:00 EST
+        fake_utc = dt(2024, 1, 15, 18, 0, 0, tzinfo=timezone.utc)
+        with patch("cadence.process_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_utc
+            mock_dt.side_effect = lambda *a, **kw: dt(*a, **kw)
+            result = _now_et()
+        self.assertEqual(result.hour, 13)
+        self.assertEqual(result.minute, 0)
+
+    def test_day_after_dst_start_uses_edt(self):
+        from cadence.process_controller import _now_et
+        from unittest.mock import patch
+        from datetime import datetime as dt, timezone
+        # March 11 2024 (Monday after DST start) at 14:30 UTC -> 10:30 EDT
+        fake_utc = dt(2024, 3, 11, 14, 30, 0, tzinfo=timezone.utc)
+        with patch("cadence.process_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_utc
+            mock_dt.side_effect = lambda *a, **kw: dt(*a, **kw)
+            result = _now_et()
+        self.assertEqual(result.hour, 10)
+        self.assertEqual(result.minute, 30)
+
+    def test_day_before_dst_start_uses_est(self):
+        from cadence.process_controller import _now_et
+        from unittest.mock import patch
+        from datetime import datetime as dt, timezone
+        # March 8 2024 (Friday before DST) at 14:30 UTC -> 09:30 EST
+        fake_utc = dt(2024, 3, 8, 14, 30, 0, tzinfo=timezone.utc)
+        with patch("cadence.process_controller.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_utc
+            mock_dt.side_effect = lambda *a, **kw: dt(*a, **kw)
+            result = _now_et()
+        self.assertEqual(result.hour, 9)
+        self.assertEqual(result.minute, 30)
 
 
 class TestProcessControllerIntegration(unittest.TestCase):

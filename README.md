@@ -113,7 +113,7 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 python3 -m pytest
 ```
 
-244 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
+258 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
 
 ## IV Rank
 
@@ -145,11 +145,22 @@ Good Friday is computed via the Anonymous Gregorian algorithm for Easter.
 `is_market_open()` returns False on all holidays and after the early
 close time on partial-day sessions.
 
+## Timezone and DST
+
+All market-hours logic runs in US Eastern with automatic DST handling.
+`market_calendar.et_offset_hours(date)` returns -4 during EDT (2nd Sun
+of March through 1st Sun of November) and -5 during EST, following
+the US rules in effect since 2007.
+
+`_now_et()` resolves to the correct local time at all times during
+market hours. The 1-2am ambiguity on transition day itself does not
+affect the bot since markets are closed then.
+
 ## Known Limitations
 
-- Market hours detection uses fixed EST offset (-5h from UTC). DST transitions may be off by ~1 hour.
 - Only symbols in `VOLATILITY_INDEX_SYMBOLS` get IV rank out of the box. Others need `IVHistoryStore` wired up and several weeks of data before IV rank filtering is useful.
 - Ad-hoc NYSE closures (presidential funerals, weather, Sept 11-style events) are not covered. Rare, not deterministic, and require manual override via kill switch.
+- Assumes US DST rules remain as enacted in 2007. If Congress permanently abolishes DST, the calendar will need a rule update.
 
 ## Disclaimer
 

@@ -180,3 +180,39 @@ def get_market_close_time(d):
 
 # Regular market open is 9:30 ET every trading day.
 MARKET_OPEN = time(9, 30)
+
+
+# ---- US Daylight Saving Time (since 2007) ----
+#
+# DST in the US runs from the 2nd Sunday of March at 2am local time
+# through the 1st Sunday of November at 2am local time. During DST
+# the offset from UTC is -4 (EDT); otherwise -5 (EST). These rules
+# have been stable since the Energy Policy Act of 2005 took effect
+# in 2007.
+
+def dst_start(year):
+    """First date of DST (EDT) for the given year. DST begins at 2am
+    local on the 2nd Sunday of March."""
+    return _nth_weekday(year, 3, 6, 2)  # weekday 6 = Sunday
+
+
+def dst_end(year):
+    """First date that is NOT in DST (i.e., first Sunday of November).
+    DST ends at 2am local on this date."""
+    return _nth_weekday(year, 11, 6, 1)
+
+
+def is_us_dst(d):
+    """True if date d falls in the US DST window (EDT).
+
+    The 2am-local transition moment is ignored; this is a date-level
+    check. For intraday precision, see et_offset_hours which handles
+    the transition edge correctly enough for market-hours use.
+    """
+    return dst_start(d.year) <= d < dst_end(d.year)
+
+
+def et_offset_hours(d):
+    """Return the ET offset from UTC (hours) for the given date.
+    -4 during EDT, -5 during EST."""
+    return -4 if is_us_dst(d) else -5

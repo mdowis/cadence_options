@@ -44,6 +44,7 @@ cadence_options/
     position_manager.py     Exit detection (profit/time/loss stops)
     executor.py             Order placement with safety validation
     process_controller.py   Scanner + executor background threads
+    market_calendar.py      NYSE holidays and early-close days
     notifier.py             Telegram notifications + commands
   tests/                    Test suite (168 tests)
     test_tradier_client.py
@@ -112,7 +113,7 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 python3 -m pytest
 ```
 
-168 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
+244 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
 
 ## IV Rank
 
@@ -129,11 +130,26 @@ These indices ARE the 30-day implied volatility of the underlying's options, so 
 
 For symbols without a matching volatility index, `IVHistoryStore` can snapshot ATM IV from the live option chain daily and build history locally over time. Requires 20+ data points before producing rankings.
 
+## Market Calendar
+
+The bot respects NYSE holidays and early-close days computed at runtime
+(no external data required):
+
+- **Full closures (10/yr)**: New Year's Day, MLK Day, Presidents' Day,
+  Good Friday, Memorial Day, Juneteenth (since 2022), Independence Day,
+  Labor Day, Thanksgiving, Christmas. Sunday holidays observed Monday.
+- **1pm ET early closes**: Day after Thanksgiving, July 3 (when July 4
+  is a weekday), December 24 (when it is a weekday).
+
+Good Friday is computed via the Anonymous Gregorian algorithm for Easter.
+`is_market_open()` returns False on all holidays and after the early
+close time on partial-day sessions.
+
 ## Known Limitations
 
 - Market hours detection uses fixed EST offset (-5h from UTC). DST transitions may be off by ~1 hour.
-- No holiday calendar. Bot will attempt to scan on market holidays.
 - Only symbols in `VOLATILITY_INDEX_SYMBOLS` get IV rank out of the box. Others need `IVHistoryStore` wired up and several weeks of data before IV rank filtering is useful.
+- Ad-hoc NYSE closures (presidential funerals, weather, Sept 11-style events) are not covered. Rare, not deterministic, and require manual override via kill switch.
 
 ## Disclaimer
 

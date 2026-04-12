@@ -6,6 +6,14 @@ import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
 
+from cadence.market_calendar import (
+    is_trading_day,
+    is_early_close,
+    is_us_holiday,
+    get_market_close_time,
+    MARKET_OPEN,
+)
+
 logger = logging.getLogger(__name__)
 
 # US Eastern approximate offset (EST = -5, EDT = -4)
@@ -19,17 +27,18 @@ def _now_et():
 
 
 def is_market_open():
-    """Check if US equity market is open (9:30-16:00 ET, Mon-Fri).
+    """Check if US equity market is open.
 
-    Known limitation: does not account for holidays or DST transitions.
+    Respects weekends, NYSE holidays, and 1pm-ET early closes.
     """
     now = _now_et()
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+    today = now.date()
+    if not is_trading_day(today):
         return False
-    t = now.time()
-    market_open = t.replace(hour=9, minute=30, second=0)
-    market_close = t.replace(hour=16, minute=0, second=0)
-    return market_open <= t < market_close
+    close_time = get_market_close_time(today)
+    if close_time is None:
+        return False
+    return MARKET_OPEN <= now.time() < close_time
 
 
 class ProcessStatus:

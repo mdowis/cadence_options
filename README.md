@@ -44,9 +44,10 @@ cadence_options/
     position_manager.py     Exit detection (profit/time/loss stops)
     executor.py             Order placement with safety validation
     process_controller.py   Scanner + executor background threads
-    market_calendar.py      NYSE holidays and early-close days
+    market_calendar.py      NYSE holidays, early closes, DST handling
+    kelly.py                Kelly-criterion position sizing
     notifier.py             Telegram notifications + commands
-  tests/                    Test suite (168 tests)
+  tests/                    Test suite (287 tests)
     test_tradier_client.py
     test_iv_rank.py
     test_strategy.py
@@ -54,6 +55,8 @@ cadence_options/
     test_position_manager.py
     test_executor.py
     test_process_controller.py
+    test_market_calendar.py
+    test_kelly.py
     test_notifier.py
     test_dashboard.py
 ```
@@ -80,6 +83,9 @@ Key settings:
 | `CADENCE_SYMBOLS` | `SPY,QQQ` | Comma-separated symbols |
 | `CADENCE_MAX_DRAWDOWN_PCT` | `10` | Kill switch threshold |
 | `CADENCE_DRAWDOWN_REFERENCE` | `session_start` | `session_start` or `peak` |
+| `CADENCE_MAX_PER_POSITION_PCT` | `2` | Hard ceiling on per-position risk |
+| `CADENCE_USE_KELLY` | `false` | Opt-in Kelly-based position sizing |
+| `CADENCE_KELLY_FRACTION` | `0.25` | Fractional-Kelly safety factor (quarter) |
 | `CADENCE_PORT` | `8050` | Dashboard HTTP port |
 
 ## Dashboard API
@@ -113,7 +119,7 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 python3 -m pytest
 ```
 
-258 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
+287 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
 
 ## IV Rank
 
@@ -129,6 +135,40 @@ IV rank is computed from the underlying's matching volatility index:
 These indices ARE the 30-day implied volatility of the underlying's options, so `(current - 52w_low) / (52w_high - 52w_low) * 100` gives a true IV rank.
 
 For symbols without a matching volatility index, `IVHistoryStore` can snapshot ATM IV from the live option chain daily and build history locally over time. Requires 20+ data points before producing rankings.
+
+## Position Sizing
+
+Two layers, both always active:
+
+**1. Hardcoded ceiling** (`CADENCE_MAX_PER_POSITION_PCT`, default 2%).
+No single position's max loss can exceed this fraction of equity. Acts
+as a one-way safety ratchet: Kelly can recommend smaller, never larger.
+
+**2. Kelly-criterion cap** (opt-in via `CADENCE_USE_KELLY=true`).
+Derives a per-position risk cap from the operator's actual trade
+history:
+
+```
+f* = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
+recommended_pct = min(f* * kelly_fraction, max_per_position_pct)
+```
+
+Defaults to quarter Kelly (`CADENCE_KELLY_FRACTION=0.25`). Full Kelly is
+provably growth-optimal in the long run but unforgiving of sampling
+noise and regime change -- fractional Kelly is how professionals
+actually trade.
+
+Before 20 completed trades, Kelly uses a conservative prior for 45-DTE
+SPY iron condors (win_rate=0.75, avg_win=30% of max profit, avg_loss=70%
+of max loss -> full Kelly ~17%, quarter ~4%, clipped by the 2% manual
+ceiling to 2%). Once 20+ trades are in the book, the cap adapts to the
+operator's empirical stats. If the edge degrades -- cap gets tighter.
+If the edge improves past the manual ceiling -- cap stays at the manual
+ceiling (safer than Kelly suggests).
+
+`get_status()` exposes `kelly.full_kelly_fraction`, `fractional_kelly_pct`,
+`effective_cap_pct`, `sample_size`, and `win_rate` so operators can see
+what the data is saying without Kelly being enforced.
 
 ## Market Calendar
 

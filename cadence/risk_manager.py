@@ -46,7 +46,8 @@ class RiskConfig:
                  max_position_count=5, max_risk_per_position_pct=2.0,
                  min_credit_pct_of_width=20.0, min_iv_rank=30.0,
                  max_portfolio_delta_cents=500000, max_portfolio_vega_cents=50000,
-                 max_consecutive_losses=5, cooldown_after_consecutive_secs=300):
+                 max_consecutive_losses=5, cooldown_after_consecutive_secs=300,
+                 use_kelly=False, kelly_fraction_of_full=0.25):
         self.max_drawdown_pct = max_drawdown_pct
         self.max_drawdown_cents = max_drawdown_cents
         self.drawdown_reference = drawdown_reference
@@ -60,6 +61,11 @@ class RiskConfig:
         self.max_portfolio_vega_cents = max_portfolio_vega_cents
         self.max_consecutive_losses = max_consecutive_losses
         self.cooldown_after_consecutive_secs = cooldown_after_consecutive_secs
+        # Kelly position sizing: when True, the per-position cap is the
+        # min of max_risk_per_position_pct and fractional-Kelly derived
+        # from trade history. Defaults off so behavior is unchanged.
+        self.use_kelly = use_kelly
+        self.kelly_fraction_of_full = kelly_fraction_of_full
 
 
 class RiskState:
@@ -270,15 +276,28 @@ class RiskManager:
                                 f"{self._state.position_count} positions >= "
                                 f"max {self.config.max_position_count}")
 
-        # 6. Per-position size
+        # 6. Per-position size: cap is the min of the manual limit and
+        # the fractional-Kelly derived cap (when Kelly is enabled).
         if (hasattr(candidate, "max_loss") and
                 self._state.current_equity_cents > 0):
             max_loss_cents = int(candidate.max_loss * 100 * contracts)  # per-contract * 100
             risk_pct = (max_loss_cents / self._state.current_equity_cents) * 100
-            if risk_pct > self.config.max_risk_per_position_pct:
+            effective_cap = self.config.max_risk_per_position_pct
+            cap_source = "manual"
+            if self.config.use_kelly:
+                from cadence.kelly import recommended_position_risk_pct
+                rec = recommended_position_risk_pct(
+                    self._state.trade_history,
+                    fraction_of_full=self.config.kelly_fraction_of_full,
+                    absolute_cap_pct=self.config.max_risk_per_position_pct,
+                )
+                effective_cap = rec["recommended_pct"]
+                if rec["fractional_kelly_pct"] < self.config.max_risk_per_position_pct:
+                    cap_source = "kelly"
+            if risk_pct > effective_cap:
                 return RiskDecision(RiskAction.BLOCK_POSITION_SIZE,
                                     f"Position risk {risk_pct:.1f}% > "
-                                    f"max {self.config.max_risk_per_position_pct}%")
+                                    f"{cap_source} cap {effective_cap:.2f}%")
 
         # 7. Daily loss limit
         daily_loss_limit_cents = self._get_daily_loss_limit_cents()
@@ -468,4 +487,34 @@ class RiskManager:
                 },
                 "drawdown_reference_mode": self.config.drawdown_reference,
                 "risk_events": list(self._state.risk_events[-10:]),
+                "kelly": self._kelly_snapshot(),
             }
+
+    def _kelly_snapshot(self):
+        """Build the Kelly diagnostic block for the dashboard.
+
+        Always computed so operators can see the recommendation even
+        when Kelly capping is disabled. The effective_cap_pct is the
+        cap actually used in risk checks: if use_kelly is False, it
+        equals max_risk_per_position_pct; otherwise min(manual, Kelly).
+        """
+        from cadence.kelly import recommended_position_risk_pct
+        rec = recommended_position_risk_pct(
+            self._state.trade_history,
+            fraction_of_full=self.config.kelly_fraction_of_full,
+            absolute_cap_pct=self.config.max_risk_per_position_pct,
+        )
+        enabled = self.config.use_kelly
+        effective = (rec["recommended_pct"] if enabled
+                     else self.config.max_risk_per_position_pct)
+        return {
+            "enabled": enabled,
+            "fraction_of_full": self.config.kelly_fraction_of_full,
+            "full_kelly_fraction": rec["kelly_fraction"],
+            "fractional_kelly_pct": rec["fractional_kelly_pct"],
+            "manual_cap_pct": self.config.max_risk_per_position_pct,
+            "effective_cap_pct": effective,
+            "sample_size": rec["sample_size"],
+            "using_defaults": rec["using_defaults"],
+            "win_rate": rec["win_rate"],
+        }

@@ -440,6 +440,8 @@ def main():
         max_portfolio_vega_cents=_env_int("CADENCE_MAX_PORTFOLIO_VEGA", 500) * 100,
         min_iv_rank=_env_float("CADENCE_MIN_IV_RANK", 30.0),
         min_credit_pct_of_width=_env_float("CADENCE_MIN_CREDIT_PCT", 20.0),
+        use_kelly=_env_bool("CADENCE_USE_KELLY", False),
+        kelly_fraction_of_full=_env_float("CADENCE_KELLY_FRACTION", 0.25),
     )
     state_file = _env("CADENCE_STATE_FILE", "")
     _risk_mgr = RiskManager(risk_config, starting_equity_cents=0,

@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cadence Options - Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --orange: #db6d28;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+header h1 { font-size: 20px; font-weight: 600; }
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+.badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.badge-muted { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+}
+.card h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.card-value {
+  font-size: 28px;
+  font-weight: 600;
+}
+.card-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+tr:hover { background: rgba(88,166,255,0.04); }
+
+.btn {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
+.btn-danger { background: rgba(248,81,73,0.15); border-color: var(--red); color: var(--red); }
+.btn-success { background: rgba(63,185,80,0.15); border-color: var(--green); color: var(--green); }
+.btn + .btn { margin-left: 8px; }
+
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+
+.drawdown-bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.drawdown-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.kill-switch-banner {
+  background: rgba(248,81,73,0.1);
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+}
+.kill-switch-banner.active { display: flex; }
+.kill-switch-banner .text { color: var(--red); font-weight: 600; }
+
+.last-update {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  padding: 4px 0;
+}
+
+@media (max-width: 900px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Cadence Options</h1>
+    <div>
+      <span id="env-badge" class="status-badge badge-muted">--</span>
+      <span id="auth-badge" class="status-badge badge-muted">--</span>
+      <span id="mode-badge" class="status-badge badge-yellow">DRY RUN</span>
+    </div>
+  </header>
+
+  <div id="kill-banner" class="kill-switch-banner">
+    <span class="text">KILL SWITCH ACTIVE: <span id="kill-reason">--</span></span>
+    <button class="btn btn-success" onclick="deactivateKillSwitch()">Resume</button>
+  </div>
+
+  <!-- Top metrics row -->
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="card">
+      <h2>Equity</h2>
+      <div class="card-value" id="equity">--</div>
+      <div class="card-label">Cash: <span id="cash">--</span></div>
+    </div>
+    <div class="card">
+      <h2>Drawdown</h2>
+      <div class="card-value" id="drawdown-pct">--</div>
+      <div class="card-label">Ref: <span id="drawdown-ref">--</span></div>
+      <div class="drawdown-bar"><div class="drawdown-fill" id="drawdown-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <h2>Daily P&L</h2>
+      <div class="card-value" id="daily-pnl">--</div>
+      <div class="card-label">Trades: <span id="daily-trades">0</span> (W:<span id="daily-wins">0</span> L:<span id="daily-losses">0</span>)</div>
+    </div>
+    <div class="card">
+      <h2>Positions</h2>
+      <div class="card-value" id="positions-count">--</div>
+      <div class="card-label">Max: <span id="positions-max">--</span></div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn" id="btn-scanner" onclick="toggleScanner()">Start Scanner</button>
+    <button class="btn" id="btn-executor" onclick="toggleExecutor()">Start Executor</button>
+    <button class="btn btn-danger" onclick="activateKillSwitch()">Kill Switch</button>
+    <button class="btn" onclick="resetDaily()">Reset Daily</button>
+    <button class="btn" onclick="testFetch()">Test Fetch</button>
+  </div>
+
+  <!-- Scanner & Candidates -->
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <h2>Scanner</h2>
+      <div>Status: <span id="scanner-status" class="status-badge badge-muted">--</span></div>
+      <div style="margin-top:8px;font-size:13px;color:var(--text-muted)" id="scanner-detail">--</div>
+      <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">Runs: <span id="scanner-runs">0</span></div>
+    </div>
+    <div class="card">
+      <h2>Executor</h2>
+      <div>Status: <span id="executor-status" class="status-badge badge-muted">--</span></div>
+      <div style="margin-top:8px;font-size:13px;color:var(--text-muted)" id="executor-detail">--</div>
+      <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">Trades: <span id="executor-trades">0</span></div>
+    </div>
+  </div>
+
+  <!-- Candidates table -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Iron Condor Candidates</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Expiration</th><th>DTE</th><th>IV Rank</th>
+          <th>Put Spread</th><th>Call Spread</th>
+          <th>Credit</th><th>Max Loss</th><th>Return%</th>
+        </tr>
+      </thead>
+      <tbody id="candidates-body">
+        <tr><td colspan="9" style="color:var(--text-muted)">No candidates</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Recent decisions -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Recent Decisions</h2>
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Ticker</th><th>Result</th><th>Detail</th></tr>
+      </thead>
+      <tbody id="decisions-body">
+        <tr><td colspan="4" style="color:var(--text-muted)">No decisions yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="last-update">Last update: <span id="last-update">--</span></div>
+</div>
+
+<script>
+const API = '';
+let scannerRunning = false;
+let executorRunning = false;
+
+function $(id) { return document.getElementById(id); }
+
+function fmt$(cents) {
+  if (cents == null) return '--';
+  return '$' + (cents / 100).toFixed(2);
+}
+
+function statusBadge(status) {
+  if (status === 'running') return 'badge-green';
+  if (status === 'stopped') return 'badge-muted';
+  return 'badge-yellow';
+}
+
+async function api(method, path) {
+  try {
+    const opts = method === 'POST' ? { method: 'POST' } : {};
+    const r = await fetch(API + path, opts);
+    return await r.json();
+  } catch (e) {
+    console.error('API error:', path, e);
+    return null;
+  }
+}
+
+async function refresh() {
+  const [risk, procs, diag] = await Promise.all([
+    api('GET', '/api/risk'),
+    api('GET', '/api/processes'),
+    api('GET', '/api/diagnostics'),
+  ]);
+
+  // Risk
+  if (risk) {
+    const eq = risk.equity || {};
+    $('equity').textContent = fmt$(eq.current);
+    $('cash').textContent = fmt$(eq.cash);
+
+    const dd = risk.drawdown || {};
+    const ddPct = (dd.current_pct || 0).toFixed(1);
+    $('drawdown-pct').textContent = ddPct + '%';
+    $('drawdown-pct').style.color = dd.current_pct > 5 ? 'var(--red)' : 'var(--text)';
+    $('drawdown-ref').textContent = dd.reference_mode || '--';
+
+    const barPct = Math.min(dd.current_pct || 0, dd.max_pct || 10) / (dd.max_pct || 10) * 100;
+    const bar = $('drawdown-bar');
+    bar.style.width = barPct + '%';
+    bar.style.background = barPct > 70 ? 'var(--red)' : barPct > 40 ? 'var(--yellow)' : 'var(--green)';
+
+    const daily = risk.daily || {};
+    const pnl = daily.pnl_cents || 0;
+    $('daily-pnl').textContent = fmt$(pnl);
+    $('daily-pnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    $('daily-trades').textContent = daily.trade_count || 0;
+    $('daily-wins').textContent = daily.win_count || 0;
+    $('daily-losses').textContent = daily.loss_count || 0;
+
+    const pos = risk.positions || {};
+    $('positions-count').textContent = pos.count || 0;
+    $('positions-max').textContent = pos.max || 5;
+
+    const ks = risk.kill_switch || {};
+    const banner = $('kill-banner');
+    if (ks.active) {
+      banner.classList.add('active');
+      $('kill-reason').textContent = ks.reason || '--';
+    } else {
+      banner.classList.remove('active');
+    }
+  }
+
+  // Processes
+  if (procs) {
+    const sc = procs.scanner || {};
+    scannerRunning = sc.status === 'running';
+    $('scanner-status').textContent = sc.status || '--';
+    $('scanner-status').className = 'status-badge ' + statusBadge(sc.status);
+    $('scanner-detail').textContent = sc.last_detail || '--';
+    $('scanner-runs').textContent = sc.run_count || 0;
+    $('btn-scanner').textContent = scannerRunning ? 'Stop Scanner' : 'Start Scanner';
+    $('btn-scanner').className = scannerRunning ? 'btn btn-danger' : 'btn btn-success';
+
+    const ex = procs.executor || {};
+    executorRunning = ex.status === 'running';
+    $('executor-status').textContent = ex.status || '--';
+    $('executor-status').className = 'status-badge ' + statusBadge(ex.status);
+    $('executor-detail').textContent = ex.last_detail || '--';
+    $('executor-trades').textContent = ex.trades_placed || 0;
+    $('btn-executor').textContent = executorRunning ? 'Stop Executor' : 'Start Executor';
+    $('btn-executor').className = executorRunning ? 'btn btn-danger' : 'btn btn-success';
+
+    // Config badges
+    const cfg = procs.config || {};
+    $('mode-badge').textContent = cfg.dry_run === false ? 'LIVE' : 'DRY RUN';
+    $('mode-badge').className = 'status-badge ' + (cfg.dry_run === false ? 'badge-red' : 'badge-yellow');
+
+    // Candidates
+    const cands = procs.candidates || [];
+    const tbody = $('candidates-body');
+    if (cands.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted)">No candidates</td></tr>';
+    } else {
+      tbody.innerHTML = cands.map(c =>
+        '<tr>' +
+        '<td>' + (c.symbol || '--') + '</td>' +
+        '<td>' + (c.expiration || '--') + '</td>' +
+        '<td>' + (c.dte || '--') + '</td>' +
+        '<td>' + (c.iv_rank ? c.iv_rank.toFixed(1) : '--') + '</td>' +
+        '<td>' + (c.short_put_strike || '--') + '/' + (c.long_put_strike || '--') + '</td>' +
+        '<td>' + (c.short_call_strike || '--') + '/' + (c.long_call_strike || '--') + '</td>' +
+        '<td>$' + (c.credit ? c.credit.toFixed(2) : '--') + '</td>' +
+        '<td>$' + (c.max_loss ? c.max_loss.toFixed(2) : '--') + '</td>' +
+        '<td>' + (c.return_pct ? c.return_pct.toFixed(1) + '%' : '--') + '</td>' +
+        '</tr>'
+      ).join('');
+    }
+
+    // Recent decisions
+    const decs = (ex.recent_decisions || []).slice(-10).reverse();
+    const dtbody = $('decisions-body');
+    if (decs.length === 0) {
+      dtbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted)">No decisions yet</td></tr>';
+    } else {
+      dtbody.innerHTML = decs.map(d => {
+        const t = d.time ? new Date(d.time * 1000).toLocaleTimeString() : '--';
+        const cls = d.success ? 'color:var(--green)' : 'color:var(--red)';
+        return '<tr>' +
+          '<td>' + t + '</td>' +
+          '<td>' + (d.ticker || '--') + '</td>' +
+          '<td style="' + cls + '">' + (d.success ? 'OK' : 'BLOCKED') + '</td>' +
+          '<td style="font-size:12px">' + (d.detail || '--').substring(0, 100) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+  }
+
+  // Diagnostics
+  if (diag) {
+    $('env-badge').textContent = (diag.tradier_env || 'sandbox').toUpperCase();
+    $('env-badge').className = 'status-badge ' +
+      (diag.tradier_env === 'production' ? 'badge-red' : 'badge-green');
+    $('auth-badge').textContent = diag.authenticated ? 'AUTH' : 'NO AUTH';
+    $('auth-badge').className = 'status-badge ' +
+      (diag.authenticated ? 'badge-green' : 'badge-red');
+  }
+
+  $('last-update').textContent = new Date().toLocaleTimeString();
+}
+
+async function toggleScanner() {
+  await api('POST', scannerRunning ? '/api/scanner/stop' : '/api/scanner/start');
+  setTimeout(refresh, 500);
+}
+
+async function toggleExecutor() {
+  await api('POST', executorRunning ? '/api/executor/stop' : '/api/executor/start');
+  setTimeout(refresh, 500);
+}
+
+async function activateKillSwitch() {
+  await api('POST', '/api/risk/kill-switch/activate');
+  refresh();
+}
+
+async function deactivateKillSwitch() {
+  await api('POST', '/api/risk/kill-switch/deactivate');
+  refresh();
+}
+
+async function resetDaily() {
+  await api('POST', '/api/risk/reset-daily');
+  refresh();
+}
+
+async function testFetch() {
+  const r = await api('POST', '/api/test-fetch');
+  if (r && r.quote) {
+    alert('SPY last: $' + (r.quote.last || 'N/A'));
+  } else {
+    alert('Error: ' + JSON.stringify(r));
+  }
+}
+
+// Auto-refresh every 5 seconds
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

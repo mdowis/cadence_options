@@ -6,8 +6,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.dirname(__file__))
-from iv_rank import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.iv_rank import (
     compute_iv_rank,
     compute_iv_percentile,
     get_cached_iv_rank,
@@ -75,7 +75,7 @@ class TestIVRankCache(unittest.TestCase):
         self.assertAlmostEqual(r1, 50.0)
         # Expire the cache by patching time far in the future
         future = time.time() + 3700
-        with patch("iv_rank.time.time", return_value=future):
+        with patch("cadence.iv_rank.time.time", return_value=future):
             # Different current_iv and wider range -> different rank
             r2 = get_cached_iv_rank("SPY", 15, [10, 40])
         # 15 in [10..40] = (15-10)/(40-10)*100 = 16.67

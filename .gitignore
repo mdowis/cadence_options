@@ -15,6 +15,9 @@ risk_state.json
 .DS_Store
 Thumbs.db
 
+# Test
+.pytest_cache/
+
 # IDE
 .vscode/
 .idea/

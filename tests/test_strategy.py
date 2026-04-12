@@ -6,8 +6,8 @@ import unittest
 from datetime import date
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.dirname(__file__))
-from strategy import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.strategy import (
     StrategyConfig,
     IronCondorCandidate,
     find_iron_condor_candidates,

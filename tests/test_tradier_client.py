@@ -9,8 +9,8 @@ from unittest.mock import patch, MagicMock
 from http.client import HTTPResponse
 from io import BytesIO
 
-sys.path.insert(0, os.path.dirname(__file__))
-from tradier_client import TradierClient, HTTPError
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.tradier_client import TradierClient, HTTPError
 
 
 class FakeResponse:
@@ -60,7 +60,7 @@ class TestTradierClientUnit(unittest.TestCase):
         c = TradierClient("t", "a", env="production")
         self.assertEqual(c.base_url, "https://api.tradier.com/v1")
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_quote(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "quotes": {"quote": {"symbol": "SPY", "last": 450.0}}
@@ -69,7 +69,7 @@ class TestTradierClientUnit(unittest.TestCase):
         self.assertEqual(result["symbol"], "SPY")
         self.assertEqual(result["last"], 450.0)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_option_chain(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "options": {"option": [
@@ -81,13 +81,13 @@ class TestTradierClientUnit(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["strike"], 450)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_option_chain_empty(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({"options": None})
         result = self.client.get_option_chain("SPY", "2026-05-30")
         self.assertEqual(result, [])
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_option_chain_single(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "options": {"option": {"symbol": "SPY260530C00450000", "strike": 450}}
@@ -95,7 +95,7 @@ class TestTradierClientUnit(unittest.TestCase):
         result = self.client.get_option_chain("SPY", "2026-05-30")
         self.assertEqual(len(result), 1)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_expirations(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "expirations": {"date": ["2026-05-30", "2026-06-20"]}
@@ -103,7 +103,7 @@ class TestTradierClientUnit(unittest.TestCase):
         result = self.client.get_expirations("SPY")
         self.assertEqual(len(result), 2)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_history(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "history": {"day": [{"date": "2026-04-10", "close": 450.0}]}
@@ -111,13 +111,13 @@ class TestTradierClientUnit(unittest.TestCase):
         result = self.client.get_history("SPY")
         self.assertEqual(len(result), 1)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_history_empty(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({"history": None})
         result = self.client.get_history("SPY")
         self.assertEqual(result, [])
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_balances(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "balances": {"total_equity": 100000}
@@ -125,13 +125,13 @@ class TestTradierClientUnit(unittest.TestCase):
         result = self.client.get_account_balances()
         self.assertEqual(result["balances"]["total_equity"], 100000)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_get_positions_empty(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({"positions": None})
         result = self.client.get_positions()
         self.assertEqual(result, [])
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_place_multileg_order(self, mock_urlopen):
         mock_urlopen.return_value = FakeResponse({
             "order": {"id": 12345, "status": "ok"}
@@ -154,7 +154,7 @@ class TestTradierClientUnit(unittest.TestCase):
         self.assertIn("option_symbol%5B0%5D=SPY260530P00400000", body)
         self.assertIn("side%5B0%5D=sell_to_open", body)
 
-    @patch("tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
     def test_http_error_raised(self, mock_urlopen):
         error = urllib_http_error(401, "Unauthorized")
         mock_urlopen.side_effect = error
@@ -162,8 +162,8 @@ class TestTradierClientUnit(unittest.TestCase):
             self.client.get_quote("SPY")
         self.assertEqual(ctx.exception.status_code, 401)
 
-    @patch("tradier_client.urllib.request.urlopen")
-    @patch("tradier_client.time.sleep")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.time.sleep")
     def test_429_retry(self, mock_sleep, mock_urlopen):
         """429 should retry with backoff, then succeed."""
         error_429 = urllib_http_error(429, "Rate limited")
@@ -175,8 +175,8 @@ class TestTradierClientUnit(unittest.TestCase):
         self.assertEqual(result["symbol"], "SPY")
         mock_sleep.assert_called_once()
 
-    @patch("tradier_client.urllib.request.urlopen")
-    @patch("tradier_client.time.sleep")
+    @patch("cadence.tradier_client.urllib.request.urlopen")
+    @patch("cadence.tradier_client.time.sleep")
     def test_429_exhausted(self, mock_sleep, mock_urlopen):
         """429 on all attempts should raise HTTPError."""
         mock_urlopen.side_effect = urllib_http_error(429, "Rate limited")

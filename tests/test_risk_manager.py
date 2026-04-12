@@ -8,8 +8,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.dirname(__file__))
-from risk_manager import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.risk_manager import (
     RiskManager, RiskConfig, RiskState, RiskAction, RiskDecision,
 )
 

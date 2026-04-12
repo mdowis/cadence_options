@@ -6,10 +6,10 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.dirname(__file__))
-from process_controller import ProcessController, ProcessStatus, is_market_open
-from strategy import StrategyConfig, IronCondorCandidate
-from risk_manager import RiskManager, RiskConfig
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.process_controller import ProcessController, ProcessStatus, is_market_open
+from cadence.strategy import StrategyConfig, IronCondorCandidate
+from cadence.risk_manager import RiskManager, RiskConfig
 
 
 def make_candidate(symbol="SPY", credit=2.50, max_loss=7.50, return_pct=33.3):
@@ -44,27 +44,27 @@ class TestProcessStatus(unittest.TestCase):
 
 class TestMarketHours(unittest.TestCase):
 
-    @patch("process_controller._now_et")
+    @patch("cadence.process_controller._now_et")
     def test_market_open_weekday(self, mock_now):
         from datetime import datetime
         # Wednesday at 10:00 AM ET
         mock_now.return_value = datetime(2026, 4, 15, 10, 0, 0)
         self.assertTrue(is_market_open())
 
-    @patch("process_controller._now_et")
+    @patch("cadence.process_controller._now_et")
     def test_market_closed_weekend(self, mock_now):
         from datetime import datetime
         # Saturday at 10:00 AM
         mock_now.return_value = datetime(2026, 4, 18, 10, 0, 0)
         self.assertFalse(is_market_open())
 
-    @patch("process_controller._now_et")
+    @patch("cadence.process_controller._now_et")
     def test_market_closed_before_open(self, mock_now):
         from datetime import datetime
         mock_now.return_value = datetime(2026, 4, 15, 9, 0, 0)
         self.assertFalse(is_market_open())
 
-    @patch("process_controller._now_et")
+    @patch("cadence.process_controller._now_et")
     def test_market_closed_after_close(self, mock_now):
         from datetime import datetime
         mock_now.return_value = datetime(2026, 4, 15, 16, 1, 0)

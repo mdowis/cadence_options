@@ -5,14 +5,14 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.dirname(__file__))
-from executor import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.executor import (
     build_iron_condor_legs,
     build_close_legs,
     execute_candidate,
     _validate_leg_count,
 )
-from risk_manager import RiskManager, RiskConfig, RiskAction
+from cadence.risk_manager import RiskManager, RiskConfig, RiskAction
 
 
 class FakeCandidate:

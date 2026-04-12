@@ -153,8 +153,8 @@ class ProcessController:
     # -- Scanner loop --------------------------------------------------------
 
     def _scanner_loop(self):
-        from iv_rank import compute_iv_rank
-        from strategy import find_iron_condor_candidates
+        from cadence.iv_rank import compute_iv_rank
+        from cadence.strategy import find_iron_condor_candidates
 
         while not self._scanner_stop.is_set():
             try:
@@ -238,7 +238,7 @@ class ProcessController:
     # -- Executor loop -------------------------------------------------------
 
     def _executor_loop(self):
-        from executor import execute_candidate
+        from cadence.executor import execute_candidate
 
         while not self._executor_stop.is_set():
             try:

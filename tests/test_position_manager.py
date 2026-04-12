@@ -5,8 +5,8 @@ import sys
 import unittest
 from datetime import date
 
-sys.path.insert(0, os.path.dirname(__file__))
-from position_manager import PositionManager, ExitReason
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.position_manager import PositionManager, ExitReason
 
 
 class TestPositionManager(unittest.TestCase):

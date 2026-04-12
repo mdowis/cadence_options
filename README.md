@@ -33,16 +33,28 @@ python3 dashboard.py
 ## Architecture
 
 ```
-dashboard.py            Main entry, .env loader, HTTP server, glue
-dashboard.html          Single-file interactive frontend
-tradier_client.py       Tradier REST API client (urllib only)
-iv_rank.py              IV rank computation with 1-hour cache
-strategy.py             Iron condor candidate scanner
-risk_manager.py         Trade gating, kill switch, drawdown limits
-position_manager.py     Exit detection (profit/time/loss stops)
-executor.py             Order placement with safety validation
-process_controller.py   Scanner + executor background threads
-notifier.py             Telegram notifications + commands
+cadence_options/
+  dashboard.py              Main entry, .env loader, HTTP server, glue
+  dashboard.html            Single-file interactive frontend
+  cadence/                  Core package
+    tradier_client.py       Tradier REST API client (urllib only)
+    iv_rank.py              IV rank computation with 1-hour cache
+    strategy.py             Iron condor candidate scanner
+    risk_manager.py         Trade gating, kill switch, drawdown limits
+    position_manager.py     Exit detection (profit/time/loss stops)
+    executor.py             Order placement with safety validation
+    process_controller.py   Scanner + executor background threads
+    notifier.py             Telegram notifications + commands
+  tests/                    Test suite (168 tests)
+    test_tradier_client.py
+    test_iv_rank.py
+    test_strategy.py
+    test_risk_manager.py    Includes all 7 regression tests
+    test_position_manager.py
+    test_executor.py
+    test_process_controller.py
+    test_notifier.py
+    test_dashboard.py
 ```
 
 ## Safety
@@ -97,10 +109,10 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 ## Tests
 
 ```bash
-python3 -m pytest test_*.py -v
+python3 -m pytest
 ```
 
-131 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
+168 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
 
 ## Known Limitations
 

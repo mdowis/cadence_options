@@ -7,8 +7,8 @@ import unittest
 from unittest.mock import patch, MagicMock, call
 from io import BytesIO
 
-sys.path.insert(0, os.path.dirname(__file__))
-from notifier import TelegramNotifier, build_from_env, _escape_md
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from cadence.notifier import TelegramNotifier, build_from_env, _escape_md
 
 
 # ---- Test helpers ----
@@ -106,7 +106,7 @@ class TestSend(unittest.TestCase):
         self.assertTrue(r2)
         n.stop()
 
-    @patch("notifier.urllib.request.urlopen")
+    @patch("cadence.notifier.urllib.request.urlopen")
     def test_send_now_success(self, mock_urlopen):
         """Direct test of _send_now with real method (not stubbed)."""
         mock_resp = MagicMock()
@@ -125,7 +125,7 @@ class TestSend(unittest.TestCase):
         self.assertIn(b"text=test+message", req.data)
         n.stop()
 
-    @patch("notifier.urllib.request.urlopen")
+    @patch("cadence.notifier.urllib.request.urlopen")
     def test_send_now_4xx_fails_fast(self, mock_urlopen):
         """4xx should fail immediately, no retries."""
         import urllib.error
@@ -142,8 +142,8 @@ class TestSend(unittest.TestCase):
         self.assertEqual(stats["failed"], 1)
         n.stop()
 
-    @patch("notifier.time.sleep")
-    @patch("notifier.urllib.request.urlopen")
+    @patch("cadence.notifier.time.sleep")
+    @patch("cadence.notifier.urllib.request.urlopen")
     def test_send_now_5xx_retries(self, mock_urlopen, mock_sleep):
         """5xx should retry with backoff."""
         import urllib.error
@@ -558,7 +558,7 @@ class TestBuildFromEnv(unittest.TestCase):
 
 class TestBootSkip(unittest.TestCase):
 
-    @patch("notifier.urllib.request.urlopen")
+    @patch("cadence.notifier.urllib.request.urlopen")
     def test_skip_pending_advances_offset(self, mock_urlopen):
         fake_resp = MagicMock()
         fake_resp.read.return_value = b'{"ok":true,"result":[{"update_id":42}]}'

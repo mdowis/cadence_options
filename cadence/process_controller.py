@@ -86,6 +86,7 @@ class ProcessController:
 
         self._candidates_lock = threading.Lock()
         self._candidates = []
+        self._iv_ranks = {}  # symbol -> {rank, current, min, max, source, ...}
 
         self._attempts_lock = threading.Lock()
         self._recent_attempts = {}  # fingerprint -> timestamp
@@ -136,10 +137,12 @@ class ProcessController:
         with self._candidates_lock:
             candidates = [c.to_dict() if hasattr(c, "to_dict") else c
                           for c in self._candidates]
+            iv_ranks = dict(self._iv_ranks)
         return {
             "scanner": self._scanner_status.to_dict(),
             "executor": self._executor_status.to_dict(),
             "candidates": candidates,
+            "iv_ranks": iv_ranks,
             "config": {
                 "symbols": self.strategy_config.symbols,
                 "target_dte": self.strategy_config.target_dte,
@@ -153,7 +156,7 @@ class ProcessController:
     # -- Scanner loop --------------------------------------------------------
 
     def _scanner_loop(self):
-        from cadence.iv_rank import compute_iv_rank
+        from cadence.iv_rank import get_iv_rank_from_index
         from cadence.strategy import find_iron_condor_candidates
 
         while not self._scanner_stop.is_set():
@@ -164,21 +167,19 @@ class ProcessController:
                     continue
 
                 all_candidates = []
+                iv_ranks = {}
                 for symbol in self.strategy_config.symbols:
                     try:
-                        # Compute IV rank from historical data
-                        history = self.trader.get_history(
-                            symbol, interval="daily",
-                            start=_history_start(), end=_today_str()
-                        )
-                        iv_values = [d.get("close", 0) for d in history if d.get("close")]
-                        quote = self.trader.get_quote(symbol)
-                        current_price = quote.get("last", 0)
-
-                        if iv_values and current_price:
-                            iv_rank = compute_iv_rank(current_price, iv_values)
+                        # Fetch real IV rank via the matching volatility index
+                        # (VIX for SPY, VXN for QQQ). Price history was a bug.
+                        iv_info = get_iv_rank_from_index(self.trader, symbol)
+                        if iv_info is None:
+                            logger.warning("No volatility index for %s; "
+                                           "IV rank unavailable", symbol)
+                            iv_rank = 0.0
                         else:
-                            iv_rank = 0
+                            iv_rank = iv_info.get("rank", 0.0)
+                            iv_ranks[symbol] = iv_info
 
                         candidates = find_iron_condor_candidates(
                             self.trader, symbol, self.strategy_config, iv_rank
@@ -187,6 +188,10 @@ class ProcessController:
                     except Exception as e:
                         logger.error("Scanner error for %s: %s", symbol, e)
                         self._scanner_status.last_error = f"{symbol}: {e}"
+
+                # Publish IV rank info for the dashboard
+                with self._candidates_lock:
+                    self._iv_ranks = iv_ranks
 
                 with self._candidates_lock:
                     self._candidates = sorted(
@@ -333,12 +338,3 @@ class ProcessController:
         logger.info("Dry run set to %s", value)
 
 
-def _today_str():
-    return time.strftime("%Y-%m-%d")
-
-
-def _history_start():
-    """52 weeks ago for IV rank history."""
-    now = time.time()
-    one_year_ago = now - (52 * 7 * 24 * 3600)
-    return time.strftime("%Y-%m-%d", time.localtime(one_year_ago))

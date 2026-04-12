@@ -863,10 +863,20 @@ function renderIVRank(data) {
     var info = data[sym];
     var rank = info.rank || info.iv_rank || 0;
     var color = rank >= 30 ? 'var(--green)' : rank >= 20 ? 'var(--yellow)' : 'var(--red)';
-    html += '<div class="iv-row">' +
-      '<span class="iv-sym">' + esc(sym) + '</span>' +
-      '<span class="iv-val" style="color:' + color + '">' + rank.toFixed(0) + '%</span>' +
-      '</div>';
+    var source = info.source ? ' via ' + esc(info.source) : '';
+    var range = '';
+    if (info.current && info.min && info.max) {
+      range = '<div style="font-size:10px;color:var(--dim)">current ' +
+        info.current.toFixed(2) + ' in [' + info.min.toFixed(2) + ', ' +
+        info.max.toFixed(2) + ']' + source + '</div>';
+    } else if (info.source) {
+      range = '<div style="font-size:10px;color:var(--dim)">' + source + '</div>';
+    }
+    html += '<div style="padding:6px 0;border-bottom:1px solid rgba(30,45,74,0.4)">' +
+      '<div class="iv-row">' +
+        '<span class="iv-sym">' + esc(sym) + '</span>' +
+        '<span class="iv-val" style="color:' + color + '">' + rank.toFixed(0) + '%</span>' +
+      '</div>' + range + '</div>';
   }
   panel.innerHTML = html;
 }

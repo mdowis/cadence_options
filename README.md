@@ -114,11 +114,26 @@ python3 -m pytest
 
 168 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
 
+## IV Rank
+
+IV rank is computed from the underlying's matching volatility index:
+
+| Underlying | Volatility Index |
+|------------|------------------|
+| SPY | VIX (S&P 500 Volatility Index) |
+| QQQ | VXN (Nasdaq-100 Volatility Index) |
+| IWM | RVX (Russell 2000 Volatility Index) |
+| DIA | VXD (Dow Jones Volatility Index) |
+
+These indices ARE the 30-day implied volatility of the underlying's options, so `(current - 52w_low) / (52w_high - 52w_low) * 100` gives a true IV rank.
+
+For symbols without a matching volatility index, `IVHistoryStore` can snapshot ATM IV from the live option chain daily and build history locally over time. Requires 20+ data points before producing rankings.
+
 ## Known Limitations
 
 - Market hours detection uses fixed EST offset (-5h from UTC). DST transitions may be off by ~1 hour.
 - No holiday calendar. Bot will attempt to scan on market holidays.
-- IV rank uses price history as a proxy. True IV rank would require historical implied volatility data.
+- Only symbols in `VOLATILITY_INDEX_SYMBOLS` get IV rank out of the box. Others need `IVHistoryStore` wired up and several weeks of data before IV rank filtering is useful.
 
 ## Disclaimer
 

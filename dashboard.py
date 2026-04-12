@@ -184,8 +184,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif path == "/api/iv_rank":
             data = {}
             if _process_ctrl:
+                status = _process_ctrl.get_status()
+                iv_ranks = status.get("iv_ranks", {})
                 for symbol in _process_ctrl.strategy_config.symbols:
-                    data[symbol] = {"rank": 0, "percentile": 0}
+                    info = iv_ranks.get(symbol, {})
+                    data[symbol] = {
+                        "rank": info.get("rank", 0),
+                        "current": info.get("current", 0),
+                        "min": info.get("min", 0),
+                        "max": info.get("max", 0),
+                        "source": info.get("source", ""),
+                        "history_points": info.get("history_points", 0),
+                    }
             self._send_json(data)
 
         elif path == "/api/diagnostics":

@@ -379,6 +379,25 @@ class ProcessController:
             self.risk_mgr.update_position_count(len(positions))
         except Exception as e:
             logger.warning("Position count sync error: %s", e)
+            positions = None
+
+        # Aggregate portfolio Greeks from open positions
+        if positions:
+            try:
+                from cadence.greeks import aggregate_portfolio_greeks
+                greeks = aggregate_portfolio_greeks(self.trader, positions)
+                self.risk_mgr.update_greeks(
+                    delta_cents=greeks["delta_cents"],
+                    gamma_cents=greeks["gamma_cents"],
+                    vega_cents=greeks["vega_cents"],
+                    theta_cents=greeks["theta_cents"],
+                )
+            except Exception as e:
+                logger.warning("Portfolio Greek sync error: %s", e)
+        else:
+            # No open positions -- zero the Greeks so stale values don't
+            # linger after all positions close.
+            self.risk_mgr.update_greeks(0, 0, 0, 0)
 
     # -- Helpers for setting dry_run mode ------------------------------------
 

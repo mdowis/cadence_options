@@ -46,8 +46,9 @@ cadence_options/
     process_controller.py   Scanner + executor background threads
     market_calendar.py      NYSE holidays, early closes, DST handling
     kelly.py                Kelly-criterion position sizing
+    greeks.py               Portfolio Greek aggregation
     notifier.py             Telegram notifications + commands
-  tests/                    Test suite (287 tests)
+  tests/                    Test suite (346 tests)
     test_tradier_client.py
     test_iv_rank.py
     test_strategy.py
@@ -123,7 +124,7 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 python3 -m pytest
 ```
 
-296 unit tests covering all modules. Live sandbox tests run when `TRADIER_SANDBOX_ACCESS_TOKEN` (or legacy `TRADIER_ACCESS_TOKEN`) and matching account ID are set.
+346 unit tests covering all modules. Live sandbox tests run when `TRADIER_SANDBOX_ACCESS_TOKEN` (or legacy `TRADIER_ACCESS_TOKEN`) and matching account ID are set.
 
 ## IV Rank
 

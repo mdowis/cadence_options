@@ -582,15 +582,33 @@ function toggleLiveMode(e) {
         '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
     }
   } else {
-    // Back to dry run -- no confirm needed
-    S.isDryRun = true;
-    updateExecBadge();
+    // Back to dry run -- no confirm needed. Flip server-side.
+    setDryRun(true);
+  }
+}
+async function setDryRun(value, extraHeaders) {
+  var body = 'value=' + (value ? 'true' : 'false');
+  var headers = extraHeaders || {};
+  try {
+    var r = await fetch('/api/executor/dry-run', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/x-www-form-urlencoded'}, headers),
+      body: body,
+    });
+    var data = await r.json();
+    if (!r.ok) {
+      alert('Could not change mode: ' + (data.error || ('HTTP ' + r.status)));
+      return;
+    }
+    // Refresh to pick up the new server state
+    doRefresh();
+  } catch (e) {
+    alert('Mode change failed: ' + e.message);
   }
 }
 function confirmSandboxLive() {
   cancelConfirm();
-  S.isDryRun = false;
-  updateExecBadge();
+  setDryRun(false);
 }
 function confirmLive1() {
   var area = el('confirm-area');
@@ -600,8 +618,8 @@ function confirmLive1() {
 }
 function confirmLive2() {
   cancelConfirm();
-  S.isDryRun = false;
-  updateExecBadge();
+  // Production requires the explicit confirm header on the server too
+  setDryRun(false, {'X-Cadence-Confirm-Live': 'CONFIRM-PRODUCTION-LIVE'});
 }
 
 // ---- Test fetch ----

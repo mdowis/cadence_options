@@ -275,6 +275,36 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 _process_ctrl.stop_executor()
             self._send_json({"status": "stopped"})
 
+        elif path == "/api/executor/dry-run":
+            # Toggle dry_run. Body is form-encoded "value=true|false".
+            # Production-live requires explicit confirmation via a second
+            # header so accidental fat-finger requests can't trigger real
+            # orders; sandbox-live (paper) is single-confirm client-side.
+            body = self._read_body().decode("utf-8")
+            params = {}
+            for pair in body.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+            new_val = params.get("value", "").lower()
+            if new_val not in ("true", "false"):
+                self._send_json({"error": "value must be 'true' or 'false'"}, 400)
+                return
+            dry_run_target = new_val == "true"
+            # Safety: never allow enabling production live via this endpoint
+            # unless an explicit confirm header is present. Sandbox paper is fine.
+            if (not dry_run_target) and _env("TRADIER_ENV", "sandbox") == "production":
+                confirm = self.headers.get("X-Cadence-Confirm-Live", "")
+                if confirm != "CONFIRM-PRODUCTION-LIVE":
+                    self._send_json({
+                        "error": "production live requires X-Cadence-Confirm-Live: "
+                                 "CONFIRM-PRODUCTION-LIVE header"
+                    }, 403)
+                    return
+            if _process_ctrl:
+                _process_ctrl.set_dry_run(dry_run_target)
+            self._send_json({"status": "ok", "dry_run": dry_run_target})
+
         elif path == "/api/risk/kill-switch/activate":
             if _risk_mgr:
                 _risk_mgr.activate_kill_switch("Manual activation via dashboard")

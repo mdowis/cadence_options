@@ -225,16 +225,8 @@ class ProcessController:
                         reverse=True
                     )
 
-                # Sync balance
-                try:
-                    balances = self.trader.get_account_balances()
-                    bal = balances.get("balances", {})
-                    equity = int(float(bal.get("total_equity", 0)) * 100)
-                    cash = int(float(bal.get("total_cash",
-                                            bal.get("cash", {}).get("cash_available", 0))) * 100)
-                    self.risk_mgr.sync_actual_balance(cash, portfolio_value_cents=equity)
-                except Exception as e:
-                    logger.error("Balance sync error: %s", e)
+                # Sync balance and open positions from the broker
+                self._sync_broker_state()
 
                 # Periodic status notification
                 now = time.time()
@@ -334,6 +326,11 @@ class ProcessController:
                     if ok:
                         traded += 1
                         self._executor_status.trades_placed += 1
+                        # Immediate broker sync so the dashboard reflects
+                        # the new position + equity without waiting for
+                        # the next scan cycle.
+                        if not self.dry_run:
+                            self._sync_broker_state()
                         if self.notifier:
                             try:
                                 self.notifier.notify_trade(detail)
@@ -355,6 +352,33 @@ class ProcessController:
                 self._executor_status.last_error = str(e)
 
             self._executor_stop.wait(self.scan_interval)
+
+    # -- Broker state sync ---------------------------------------------------
+
+    def _sync_broker_state(self):
+        """Pull equity, cash, and open-position count from the broker
+        and push into the risk manager so dashboard stats stay fresh.
+
+        Called periodically from the scanner loop and immediately after
+        a successful trade so operators see numbers update right away.
+        """
+        try:
+            balances = self.trader.get_account_balances()
+            bal = balances.get("balances", {})
+            equity = int(float(bal.get("total_equity", 0)) * 100)
+            cash = int(float(bal.get("total_cash",
+                                     bal.get("cash", {})
+                                        .get("cash_available", 0))) * 100)
+            self.risk_mgr.sync_actual_balance(
+                cash, portfolio_value_cents=equity)
+        except Exception as e:
+            logger.warning("Balance sync error: %s", e)
+
+        try:
+            positions = self.trader.get_positions()
+            self.risk_mgr.update_position_count(len(positions))
+        except Exception as e:
+            logger.warning("Position count sync error: %s", e)
 
     # -- Helpers for setting dry_run mode ------------------------------------
 

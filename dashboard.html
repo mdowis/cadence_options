@@ -990,9 +990,20 @@ async function doRefresh() {
     var absDelta = Math.abs(deltaD);
     el('s-positions-sub').textContent = absDelta < 50 ? 'delta neutral' : (deltaD > 0 ? 'long' : 'short') + ' $' + absDelta.toFixed(0);
 
-    // Trades today stat
-    el('s-trades').textContent = daily.trade_count || 0;
-    el('s-trades-sub').textContent = (daily.win_count || 0) + 'W / ' + (daily.loss_count || 0) + 'L';
+    // Trades today stat -- combine opens (from executor) and closes.
+    // procs isn't in scope here yet; pull trades_placed defensively.
+    var opensToday = 0;
+    if (procs && !procs._error) {
+      opensToday = (procs.executor && procs.executor.trades_placed) || 0;
+    }
+    var closes = daily.trade_count || 0;
+    el('s-trades').textContent = opensToday + closes;
+    var subParts = [opensToday + ' open'];
+    if (closes > 0) {
+      subParts.push(closes + ' closed (' +
+        (daily.win_count || 0) + 'W/' + (daily.loss_count || 0) + 'L)');
+    }
+    el('s-trades-sub').textContent = subParts.join(', ');
 
     // Greek gauges
     renderGauge('g-delta-fill', 'g-delta-val', greeks.delta_cents, risk.drawdown ? 500000 : 500000, {bidirectional: true});

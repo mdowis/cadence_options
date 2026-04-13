@@ -186,6 +186,50 @@ class TestRegression6_AttemptDedup(unittest.TestCase):
         self.assertEqual(len(eligible), 1, "Candidate past TTL should be eligible again")
 
 
+class TestBrokerSync(unittest.TestCase):
+    """Verify _sync_broker_state pulls equity AND position count from the broker."""
+
+    def setUp(self):
+        self.trader = MagicMock()
+        self.trader.get_account_balances.return_value = {
+            "balances": {"total_equity": 10000.00, "total_cash": 8000.00}
+        }
+        self.trader.get_positions.return_value = [
+            {"symbol": "SPY260530P00435000"},
+            {"symbol": "SPY260530P00425000"},
+            {"symbol": "SPY260530C00465000"},
+            {"symbol": "SPY260530C00475000"},
+        ]
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=0)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, scan_interval=0.1,
+        )
+
+    def test_sync_updates_equity(self):
+        self.pc._sync_broker_state()
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["equity"]["current"], 1000000)  # $10,000 in cents
+
+    def test_sync_updates_position_count(self):
+        self.pc._sync_broker_state()
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["positions"]["count"], 4)
+
+    def test_sync_resilient_to_balance_failure(self):
+        self.trader.get_account_balances.side_effect = RuntimeError("api down")
+        # Shouldn't raise; position count still syncs
+        self.pc._sync_broker_state()
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["positions"]["count"], 4)
+
+    def test_sync_resilient_to_position_failure(self):
+        self.trader.get_positions.side_effect = RuntimeError("api down")
+        self.pc._sync_broker_state()
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["equity"]["current"], 1000000)
+
+
 class TestSetDryRun(unittest.TestCase):
 
     def test_toggle(self):

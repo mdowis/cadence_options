@@ -14,6 +14,9 @@ from cadence.iv_rank import (
     get_cached_iv_rank,
     clear_cache,
     get_iv_rank_from_index,
+    get_iv_rank_from_realized_vol,
+    get_iv_rank,
+    compute_realized_vol_series,
     get_atm_iv_from_chain,
     IVHistoryStore,
     VOLATILITY_INDEX_SYMBOLS,
@@ -187,6 +190,125 @@ class TestGetIVRankFromIndex(unittest.TestCase):
         trader.get_history.return_value = [{"close": 10.0}, {"close": 20.0}]
         result = get_iv_rank_from_index(trader, "SPY")
         self.assertEqual(result["current"], 16.0)
+
+
+class TestComputeRealizedVolSeries(unittest.TestCase):
+
+    def test_insufficient_prices_returns_empty(self):
+        self.assertEqual(compute_realized_vol_series([100, 101], window=20), [])
+
+    def test_rolling_window(self):
+        # 22 prices -> 21 log returns -> 2 rolling-20 windows
+        import math
+        prices = [100.0 * math.exp(0.01 * i) for i in range(22)]
+        series = compute_realized_vol_series(prices, window=20)
+        self.assertEqual(len(series), 2)
+        # Constant log-return series has near-zero variance
+        for v in series:
+            self.assertAlmostEqual(v, 0.0, places=3)
+
+    def test_vol_is_positive_for_varying_prices(self):
+        import random
+        random.seed(42)
+        prices = [100.0]
+        for _ in range(40):
+            prices.append(prices[-1] * (1 + random.uniform(-0.02, 0.02)))
+        series = compute_realized_vol_series(prices, window=20)
+        self.assertTrue(all(v > 0 for v in series))
+        # Reasonable range for ~2% daily moves: 10-50% annualized
+        for v in series:
+            self.assertGreater(v, 5.0)
+            self.assertLess(v, 100.0)
+
+    def test_handles_zero_prices_gracefully(self):
+        prices = [100.0] + [0.0] + [101.0] * 30
+        # Should skip invalid returns; still produce a series
+        series = compute_realized_vol_series(prices, window=20)
+        # Series may be shorter than naively expected, but shouldn't crash
+        self.assertIsInstance(series, list)
+
+
+class TestGetIVRankFromRealizedVol(unittest.TestCase):
+
+    def test_sufficient_history(self):
+        trader = MagicMock()
+        import random
+        random.seed(7)
+        prices = [450.0]
+        for _ in range(100):
+            prices.append(prices[-1] * (1 + random.uniform(-0.015, 0.015)))
+        trader.get_history.return_value = [{"close": p} for p in prices]
+
+        result = get_iv_rank_from_realized_vol(trader, "SPY", window=20)
+        self.assertEqual(result.get("error", None), None)
+        self.assertIn("RV20", result["source"])
+        self.assertGreater(result["history_points"], 50)
+        self.assertGreaterEqual(result["rank"], 0.0)
+        self.assertLessEqual(result["rank"], 100.0)
+
+    def test_insufficient_history(self):
+        trader = MagicMock()
+        trader.get_history.return_value = [{"close": 100.0}] * 5
+        result = get_iv_rank_from_realized_vol(trader, "SPY", window=20)
+        self.assertEqual(result["rank"], 0.0)
+        self.assertIn("insufficient", result["error"])
+
+    def test_api_error(self):
+        trader = MagicMock()
+        trader.get_history.side_effect = RuntimeError("network fail")
+        result = get_iv_rank_from_realized_vol(trader, "SPY")
+        self.assertEqual(result["rank"], 0.0)
+        self.assertIn("network fail", result["error"])
+
+
+class TestGetIVRankFallback(unittest.TestCase):
+    """Verify get_iv_rank tries the index first, falls back to RV."""
+
+    def test_index_succeeds_no_fallback(self):
+        trader = MagicMock()
+        trader.get_history.return_value = [{"close": 15.0}, {"close": 18.0},
+                                            {"close": 20.0}]
+        trader.get_quote.return_value = {"last": 17.0}
+        result = get_iv_rank(trader, "SPY")
+        self.assertEqual(result["source"], "VIX")
+        self.assertNotIn("fallback_from", result)
+
+    def test_index_no_history_falls_back_to_rv(self):
+        """Regression: Tradier sandbox returns empty VIX history.
+        Scanner should fall back to realized vol of SPY itself."""
+        import random
+        random.seed(3)
+        trader = MagicMock()
+        # First call (VIX history) returns empty; second (SPY history)
+        # returns usable data.
+        spy_prices = [450.0]
+        for _ in range(80):
+            spy_prices.append(spy_prices[-1] * (1 + random.uniform(-0.01, 0.01)))
+
+        def history_side_effect(symbol, **kwargs):
+            if symbol == "VIX":
+                return []  # sandbox has no VIX history
+            return [{"close": p} for p in spy_prices]
+        trader.get_history.side_effect = history_side_effect
+        trader.get_quote.return_value = {"last": 16.0}
+
+        result = get_iv_rank(trader, "SPY")
+        self.assertIn("RV20", result["source"])
+        self.assertIn("fallback_reason", result)
+        self.assertIn("no history", result["fallback_reason"])
+        self.assertGreater(result["history_points"], 0)
+
+    def test_unsupported_symbol_goes_straight_to_rv(self):
+        """Symbol with no vol index mapping should skip straight to RV."""
+        import random
+        random.seed(9)
+        trader = MagicMock()
+        prices = [50.0]
+        for _ in range(80):
+            prices.append(prices[-1] * (1 + random.uniform(-0.02, 0.02)))
+        trader.get_history.return_value = [{"close": p} for p in prices]
+        result = get_iv_rank(trader, "TSLA")
+        self.assertIn("RV", result["source"])
 
 
 class TestGetAtmIVFromChain(unittest.TestCase):

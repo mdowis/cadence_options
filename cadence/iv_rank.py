@@ -12,6 +12,7 @@ daily and builds up history over time.
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -175,6 +176,132 @@ def get_iv_rank_from_index(trader, underlying, today_fn=None):
         return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
                 "source": index_symbol, "history_points": 0,
                 "error": str(e)}
+
+
+# ============================================================================
+# Fallback: realized volatility from underlying price history
+# ============================================================================
+#
+# When the volatility index isn't available (e.g., Tradier sandbox
+# doesn't serve VIX/VXN history, or a symbol doesn't have a matching
+# vol index at all), we can compute rolling realized volatility from
+# the underlying's own daily closes and rank the current RV against
+# its 52w history. RV-rank is not the same thing as IV-rank, but the
+# two track each other closely enough across vol regimes to be a
+# useful stand-in while true IV data is unavailable.
+
+REALIZED_VOL_WINDOW = 20  # trading days for rolling RV
+TRADING_DAYS_PER_YEAR = 252
+
+
+def compute_realized_vol_series(prices, window=REALIZED_VOL_WINDOW,
+                                annualize_days=TRADING_DAYS_PER_YEAR):
+    """Rolling N-day annualized realized volatility from a list of daily closes.
+
+    Returns the RV series in percentage points (e.g., 18.5 for 18.5%).
+    Empty list if input is too short.
+    """
+    if len(prices) < window + 1:
+        return []
+    log_returns = []
+    for i in range(1, len(prices)):
+        prev, cur = prices[i - 1], prices[i]
+        if prev <= 0 or cur <= 0:
+            continue
+        log_returns.append(math.log(cur / prev))
+
+    if len(log_returns) < window:
+        return []
+
+    vols = []
+    for end_idx in range(window, len(log_returns) + 1):
+        window_rets = log_returns[end_idx - window:end_idx]
+        mean = sum(window_rets) / window
+        variance = sum((r - mean) ** 2 for r in window_rets) / (window - 1)
+        annualized = math.sqrt(variance) * math.sqrt(annualize_days)
+        vols.append(annualized * 100.0)
+    return vols
+
+
+def get_iv_rank_from_realized_vol(trader, underlying,
+                                  window=REALIZED_VOL_WINDOW, today_fn=None):
+    """Compute IV rank from the underlying's realized volatility history.
+
+    Fallback for when no volatility index is available or serving data.
+    Returns the same shape as get_iv_rank_from_index. The source field
+    is set to "<SYMBOL> RV{window}" so operators can tell at a glance
+    which method provided the number.
+    """
+    try:
+        start = _history_start_str()
+        end = time.strftime("%Y-%m-%d") if today_fn is None else today_fn()
+        history = trader.get_history(
+            underlying, interval="daily", start=start, end=end
+        )
+        prices = []
+        for d in history:
+            c = d.get("close")
+            if c is None:
+                continue
+            try:
+                prices.append(float(c))
+            except (TypeError, ValueError):
+                continue
+
+        if len(prices) < window + 1:
+            return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
+                    "source": f"{underlying} RV{window}",
+                    "history_points": len(prices),
+                    "error": f"insufficient price history for {underlying} "
+                             f"({len(prices)} closes, need {window + 1})"}
+
+        rv_series = compute_realized_vol_series(prices, window=window)
+        if not rv_series:
+            return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
+                    "source": f"{underlying} RV{window}",
+                    "history_points": 0,
+                    "error": "could not compute realized vol series"}
+
+        current_rv = rv_series[-1]
+        rank = compute_iv_rank(current_rv, rv_series)
+        return {
+            "rank": rank,
+            "current": current_rv,
+            "min": min(rv_series),
+            "max": max(rv_series),
+            "source": f"{underlying} RV{window}",
+            "history_points": len(rv_series),
+        }
+    except Exception as e:
+        logger.warning("Realized-vol IV rank for %s failed: %s", underlying, e)
+        return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
+                "source": f"{underlying} RV{window}",
+                "history_points": 0,
+                "error": str(e)}
+
+
+def get_iv_rank(trader, underlying, today_fn=None):
+    """Get IV rank from the best-available source with automatic fallback.
+
+    Order of preference:
+      1. Matching volatility index (VIX/VXN/RVX/VXD) via the broker
+      2. Realized volatility of the underlying itself
+
+    Returns the same shape as the individual functions with an
+    additional `fallback_reason` field when the primary source was
+    tried but unusable.
+    """
+    primary = get_iv_rank_from_index(trader, underlying, today_fn=today_fn)
+    if (primary is not None
+            and not primary.get("error")
+            and primary.get("history_points", 0) > 0):
+        return primary
+
+    fallback = get_iv_rank_from_realized_vol(trader, underlying, today_fn=today_fn)
+    if primary is not None and primary.get("error"):
+        fallback["fallback_from"] = primary.get("source")
+        fallback["fallback_reason"] = primary["error"]
+    return fallback
 
 
 # ============================================================================

@@ -172,7 +172,7 @@ class ProcessController:
     # -- Scanner loop --------------------------------------------------------
 
     def _scanner_loop(self):
-        from cadence.iv_rank import get_iv_rank_from_index
+        from cadence.iv_rank import get_iv_rank
         from cadence.strategy import find_iron_condor_candidates
 
         while not self._scanner_stop.is_set():
@@ -186,17 +186,22 @@ class ProcessController:
                 iv_ranks = {}
                 for symbol in self.strategy_config.symbols:
                     try:
-                        # Fetch real IV rank via the matching volatility index
-                        # (VIX for SPY, VXN for QQQ). Price history was a bug.
-                        iv_info = get_iv_rank_from_index(self.trader, symbol)
-                        if iv_info is None:
-                            logger.warning("No volatility index for %s; "
-                                           "IV rank unavailable", symbol)
-                            iv_rank = 0.0
-                        else:
-                            iv_rank = iv_info.get("rank", 0.0)
+                        # Fetch IV rank with automatic fallback: try the
+                        # matching volatility index (VIX/VXN) first, fall
+                        # back to realized volatility of the underlying
+                        # when the index isn't available (e.g., Tradier
+                        # sandbox doesn't serve VIX history).
+                        iv_info = get_iv_rank(self.trader, symbol)
+                        iv_rank = iv_info.get("rank", 0.0) if iv_info else 0.0
+                        if iv_info:
                             iv_ranks[symbol] = iv_info
-                            if iv_info.get("error"):
+                            if iv_info.get("fallback_reason"):
+                                logger.info("IV rank for %s: fell back to %s "
+                                            "(primary %s: %s)",
+                                            symbol, iv_info.get("source"),
+                                            iv_info.get("fallback_from"),
+                                            iv_info["fallback_reason"])
+                            elif iv_info.get("error"):
                                 logger.warning("IV rank for %s via %s: %s",
                                                symbol, iv_info.get("source"),
                                                iv_info["error"])

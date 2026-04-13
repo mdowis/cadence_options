@@ -138,6 +138,8 @@ IV rank is computed from the underlying's matching volatility index:
 
 These indices ARE the 30-day implied volatility of the underlying's options, so `(current - 52w_low) / (52w_high - 52w_low) * 100` gives a true IV rank.
 
+**Automatic fallback:** if the volatility index isn't served by the broker (Tradier sandbox, for example, doesn't return VIX/VXN history), the scanner falls back to **realized volatility** computed from the underlying's own 52w price history (rolling 20-day annualized stdev of log returns). RV rank is an imperfect proxy for IV rank but tracks vol regimes closely enough to be useful, and works anywhere price history works. The dashboard shows the source (`VIX`, `VIX (latest close)`, or `SPY RV20`) so operators know which method produced the number.
+
 For symbols without a matching volatility index, `IVHistoryStore` can snapshot ATM IV from the live option chain daily and build history locally over time. Requires 20+ data points before producing rankings.
 
 ## Position Sizing

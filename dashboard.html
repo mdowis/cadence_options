@@ -215,7 +215,7 @@ tr:hover td { background: rgba(59,130,246,0.03); }
   <button class="banner-dismiss" onclick="dismissBanner('banner-demo')">&times;</button>
 </div>
 <div id="banner-live" class="banner banner-amber">
-  <span class="banner-text">LIVE TRADING is enabled. The executor will place real orders.</span>
+  <span class="banner-text">LIVE PRODUCTION TRADING is enabled. The executor will place real orders with real money.</span>
 </div>
 
 <!-- ============ STATS ROW ============ -->
@@ -565,18 +565,32 @@ async function doResume() {
 function toggleLiveMode(e) {
   e.preventDefault();
   e.stopPropagation();
+  var isProd = S.tradierEnv === 'production';
   if (S.isDryRun) {
-    // Switching to live -- double confirmation
     var area = el('confirm-area');
-    area.innerHTML = '<div class="confirm-inline"><span class="confirm-text">Enable LIVE trading? Real orders will be placed.</span>' +
-      '<button class="btn btn-sm btn-red" onclick="confirmLive1()">Yes, enable live</button>' +
-      '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+    if (isProd) {
+      // Production: two-step confirmation because real money
+      area.innerHTML = '<div class="confirm-inline">' +
+        '<span class="confirm-text">Enable LIVE trading to PRODUCTION? Real money orders will be placed.</span>' +
+        '<button class="btn btn-sm btn-red" onclick="confirmLive1()">Yes, enable live</button>' +
+        '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+    } else {
+      // Sandbox: single confirmation -- it's paper money
+      area.innerHTML = '<div class="confirm-inline">' +
+        '<span class="confirm-text">Enable paper trading on Tradier sandbox? Orders will fill against your sandbox (paper) balance, not real money.</span>' +
+        '<button class="btn btn-sm btn-green" onclick="confirmSandboxLive()">Enable paper trading</button>' +
+        '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+    }
   } else {
     // Back to dry run -- no confirm needed
-    // Note: backend doesn't have a toggle endpoint yet; this is UI-only indication
     S.isDryRun = true;
     updateExecBadge();
   }
+}
+function confirmSandboxLive() {
+  cancelConfirm();
+  S.isDryRun = false;
+  updateExecBadge();
 }
 function confirmLive1() {
   var area = el('confirm-area');
@@ -641,27 +655,40 @@ function updateExecBadge() {
   var b = el('exec-badge');
   var t = el('live-toggle');
   var l = el('live-label');
+  var isProd = S.tradierEnv === 'production';
+  // Three modes:
+  //   DRY RUN       -> no orders sent anywhere (blue)
+  //   PAPER         -> live orders to Tradier sandbox (amber, safe)
+  //   LIVE          -> live orders to Tradier production (red, real money)
   if (!S.executorRunning) {
     b.className = 'badge badge-gray';
     b.innerHTML = '<span class="dot dot-gray"></span> EXECUTOR OFF';
   } else if (S.isDryRun) {
     b.className = 'badge badge-blue';
     b.innerHTML = '<span class="dot dot-green pulse"></span> DRY RUN';
+  } else if (!isProd) {
+    b.className = 'badge badge-yellow';
+    b.innerHTML = '<span class="dot dot-yellow pulse"></span> PAPER (sandbox)';
   } else {
     b.className = 'badge badge-red';
-    b.innerHTML = '<span class="dot dot-red pulse-fast"></span> LIVE TRADING';
+    b.innerHTML = '<span class="dot dot-red pulse-fast"></span> LIVE (PRODUCTION)';
   }
+  // Toggle label mirrors the badge
   if (S.isDryRun) {
     t.classList.remove('on');
     l.textContent = 'DRY RUN';
     l.style.color = 'var(--dim)';
+  } else if (!isProd) {
+    t.classList.add('on');
+    l.textContent = 'PAPER';
+    l.style.color = 'var(--yellow)';
   } else {
     t.classList.add('on');
     l.textContent = 'LIVE';
     l.style.color = 'var(--red)';
   }
-  // Live banner
-  if (!S.isDryRun && S.executorRunning) showBanner('banner-live');
+  // Only show the scary red banner for actual production live trading
+  if (!S.isDryRun && S.executorRunning && isProd) showBanner('banner-live');
   else hideBanner('banner-live');
 }
 

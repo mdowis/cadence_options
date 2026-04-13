@@ -11,6 +11,7 @@ from cadence.executor import (
     build_close_legs,
     execute_candidate,
     _validate_leg_count,
+    _format_order_summary,
 )
 from cadence.risk_manager import RiskManager, RiskConfig, RiskAction
 
@@ -19,6 +20,7 @@ class FakeCandidate:
     def __init__(self):
         self.symbol = "SPY"
         self.expiration = "2026-05-30"
+        self.dte = 45
         self.short_put_symbol = "SPY260530P00435000"
         self.short_put_strike = 435
         self.long_put_symbol = "SPY260530P00425000"
@@ -81,6 +83,36 @@ class TestValidateLegCount(unittest.TestCase):
     def test_3_legs_rejected(self):
         with self.assertRaises(ValueError):
             _validate_leg_count([1, 2, 3])
+
+
+class TestFormatOrderSummary(unittest.TestCase):
+
+    def test_human_readable_summary(self):
+        c = FakeCandidate()
+        s = _format_order_summary(c)
+        # Expect: "SPY IC 45DTE 425/435P 465/475C $2.50cr"
+        self.assertIn("SPY", s)
+        self.assertIn("45DTE", s)
+        self.assertIn("425/435P", s)
+        self.assertIn("465/475C", s)
+        self.assertIn("$2.50cr", s)
+
+    def test_contracts_suffix(self):
+        c = FakeCandidate()
+        s = _format_order_summary(c, contracts=3)
+        self.assertIn("x3", s)
+
+    def test_single_contract_no_suffix(self):
+        c = FakeCandidate()
+        s = _format_order_summary(c, contracts=1)
+        self.assertNotIn(" x1", s)
+
+    def test_no_raw_option_symbols(self):
+        """Regression: the old detail string dumped full OCC symbols
+        like 'SPY260530P00435000' which were unreadable."""
+        c = FakeCandidate()
+        s = _format_order_summary(c)
+        self.assertNotIn("SPY260530", s)
 
 
 class TestExecuteCandidate(unittest.TestCase):

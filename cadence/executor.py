@@ -34,6 +34,29 @@ def build_close_legs(position, contracts=1):
     ]
 
 
+def _format_order_summary(candidate, contracts=1):
+    """Concise human-readable summary of an iron condor order.
+
+    Example: "QQQ IC 45DTE 557/567P 654/665C $2.32cr x1"
+    """
+    def _s(x):
+        # Render strikes as int when exact, else one decimal
+        try:
+            return f"{int(x)}" if float(x) == int(x) else f"{x:.1f}"
+        except (TypeError, ValueError):
+            return str(x)
+
+    parts = [
+        f"{candidate.symbol} IC {candidate.dte}DTE",
+        f"{_s(candidate.long_put_strike)}/{_s(candidate.short_put_strike)}P",
+        f"{_s(candidate.short_call_strike)}/{_s(candidate.long_call_strike)}C",
+        f"${candidate.credit:.2f}cr",
+    ]
+    if contracts != 1:
+        parts.append(f"x{contracts}")
+    return " ".join(parts)
+
+
 def _validate_leg_count(legs):
     """Safety: only allow 4-leg (iron condor) or 2-leg (credit spread) orders."""
     if len(legs) not in (2, 4):
@@ -72,11 +95,12 @@ def execute_candidate(trader, risk_mgr, candidate, contracts=1, dry_run=True):
     legs = build_iron_condor_legs(candidate, contracts)
     _validate_leg_count(legs)
 
+    # Concise human-readable summary used in both dry-run and live detail
+    summary = _format_order_summary(candidate, contracts)
+
     # 4. Dry run: log and return
     if dry_run:
-        leg_desc = "; ".join(f"{sym} {side} x{qty}" for sym, side, qty in legs)
-        detail = (f"[DRY RUN] Would place {candidate.symbol} iron condor: "
-                  f"{leg_desc} @ {candidate.credit:.2f} credit, tag={tag}")
+        detail = f"[DRY RUN] {summary}"
         logger.info(detail)
         return True, detail
 
@@ -93,8 +117,7 @@ def execute_candidate(trader, risk_mgr, candidate, contracts=1, dry_run=True):
         order = result.get("order", {})
         order_id = order.get("id", "unknown")
         status = order.get("status", "unknown")
-        detail = (f"Placed {candidate.symbol} iron condor: order_id={order_id}, "
-                  f"status={status}, credit={candidate.credit:.2f}, tag={tag}")
+        detail = f"{summary} order_id={order_id} status={status}"
         logger.info(detail)
         return True, detail
     except Exception as e:

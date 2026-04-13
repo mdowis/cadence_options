@@ -82,7 +82,8 @@ class ProcessController:
 
     def __init__(self, trader, risk_mgr, strategy_config, notifier=None,
                  scan_interval=60, position_interval=30, dry_run=True,
-                 status_interval_secs=3600):
+                 status_interval_secs=3600, position_manager=None,
+                 position_tracker=None):
         self.trader = trader
         self.risk_mgr = risk_mgr
         self.strategy_config = strategy_config
@@ -91,6 +92,8 @@ class ProcessController:
         self.position_interval = position_interval
         self.dry_run = dry_run
         self.status_interval_secs = status_interval_secs
+        self.position_manager = position_manager
+        self.position_tracker = position_tracker
 
         self._scanner_status = ProcessStatus()
         self._executor_status = ProcessStatus()
@@ -306,7 +309,8 @@ class ProcessController:
                     fp = candidate.fingerprint()
                     ok, detail = execute_candidate(
                         self.trader, self.risk_mgr, candidate,
-                        contracts=1, dry_run=self.dry_run
+                        contracts=1, dry_run=self.dry_run,
+                        tracker=self.position_tracker,
                     )
 
                     # Record attempt
@@ -398,6 +402,48 @@ class ProcessController:
             # No open positions -- zero the Greeks so stale values don't
             # linger after all positions close.
             self.risk_mgr.update_greeks(0, 0, 0, 0)
+
+        # Detect closed positions (tracked locally but missing from broker),
+        # compute realized P&L, record them for daily P&L / Kelly stats.
+        if self.position_tracker is not None and positions is not None:
+            self._detect_and_record_closes(positions)
+
+    def _detect_and_record_closes(self, broker_positions):
+        """For any tracked position whose legs no longer appear at the
+        broker, fetch the closing order fills and record realized P&L."""
+        try:
+            closed = self.position_tracker.detect_closes(broker_positions)
+        except Exception as e:
+            logger.warning("Close detection failed: %s", e)
+            return
+
+        for tracked in closed:
+            try:
+                pnl_cents, detail = self.position_tracker.compute_realized_pnl_cents(
+                    tracked, self.trader)
+            except Exception as e:
+                logger.warning("P&L computation failed for tag %s: %s",
+                               tracked.tag, e)
+                pnl_cents, detail = None, None
+
+            if pnl_cents is None:
+                # We know it closed but couldn't resolve P&L. Record
+                # a zero-P&L entry so daily counters advance; flag it.
+                detail = (detail if isinstance(detail, str)
+                          else f"{tracked.symbol} IC closed (P&L unknown)")
+                self.risk_mgr.record_trade(0, f"UNRESOLVED: {detail}")
+                logger.warning("Recorded close with unknown P&L: %s", detail)
+            else:
+                self.risk_mgr.record_trade(pnl_cents, detail)
+                logger.info("Recorded close: %s", detail)
+                if self.notifier:
+                    try:
+                        self.notifier.send(f"Closed: {detail}")
+                    except Exception:
+                        pass
+
+            # Stop tracking locally regardless of whether we got P&L
+            self.position_tracker.remove(tracked.tag)
 
     # -- Helpers for setting dry_run mode ------------------------------------
 

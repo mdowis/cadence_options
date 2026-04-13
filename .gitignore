@@ -10,6 +10,7 @@ build/
 
 # State
 risk_state.json
+position_tracker.json
 
 # OS
 .DS_Store

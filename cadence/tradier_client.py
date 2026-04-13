@@ -138,6 +138,21 @@ class TradierClient:
         data = self._request("GET", f"/accounts/{self.account_id}/orders/{order_id}")
         return data.get("order", data)
 
+    def get_orders(self, include_tags=True):
+        """List all orders on the account. Returns list of order dicts."""
+        params = {}
+        if include_tags:
+            params["includeTags"] = "true"
+        data = self._request("GET", f"/accounts/{self.account_id}/orders",
+                             params=params)
+        orders = data.get("orders", {})
+        if not orders:
+            return []
+        order_list = orders.get("order", [])
+        if isinstance(order_list, dict):
+            return [order_list]
+        return order_list or []
+
     def cancel_order(self, order_id):
         """Cancel an order."""
         return self._request("DELETE", f"/accounts/{self.account_id}/orders/{order_id}")

@@ -66,10 +66,13 @@ def _validate_leg_count(legs):
         )
 
 
-def execute_candidate(trader, risk_mgr, candidate, contracts=1, dry_run=True):
+def execute_candidate(trader, risk_mgr, candidate, contracts=1,
+                      dry_run=True, tracker=None):
     """Execute an iron condor trade through the full safety pipeline.
 
-    Returns (success: bool, detail: str).
+    Returns (success: bool, detail: str). When `tracker` is provided
+    and the live order places successfully, records the entry into
+    the tracker so closes can later be detected and P&L attributed.
     """
     tag = f"cadence-{uuid.uuid4().hex[:8]}"
 
@@ -119,6 +122,12 @@ def execute_candidate(trader, risk_mgr, candidate, contracts=1, dry_run=True):
         status = order.get("status", "unknown")
         detail = f"{summary} order_id={order_id} status={status}"
         logger.info(detail)
+        # Record locally so we can detect the close later and compute P&L
+        if tracker is not None:
+            try:
+                tracker.record_entry(candidate, tag=tag, contracts=contracts)
+            except Exception as e:
+                logger.warning("Tracker record_entry failed: %s", e)
         return True, detail
     except Exception as e:
         detail = f"Order placement failed: {e}"

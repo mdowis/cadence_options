@@ -14,6 +14,7 @@ from cadence.risk_manager import RiskManager, RiskConfig
 from cadence.strategy import StrategyConfig
 from cadence.process_controller import ProcessController
 from cadence.position_manager import PositionManager
+from cadence.position_tracker import PositionTracker
 from cadence.notifier import build_from_env
 from cadence.iv_rank import compute_iv_rank, get_cached_iv_rank
 
@@ -493,12 +494,14 @@ def main():
         symbols=symbols,
     )
 
-    # Position manager
+    # Position manager (exit detection) and tracker (entry/close bookkeeping)
     _position_mgr = PositionManager(
         profit_target_pct=_env_float("CADENCE_PROFIT_TARGET_PCT", 50),
         time_stop_dte=_env_int("CADENCE_TIME_STOP_DTE", 21),
         loss_stop_multiplier=_env_float("CADENCE_LOSS_STOP_MULTIPLIER", 2.0),
     )
+    tracker_state_file = _env("CADENCE_TRACKER_STATE_FILE", "position_tracker.json")
+    _position_tracker = PositionTracker(state_file=tracker_state_file or None)
 
     # Process controller
     status_interval = _env_int("CADENCE_TELEGRAM_STATUS_INTERVAL", 3600)
@@ -509,6 +512,8 @@ def main():
         notifier=_notifier if _notifier.enabled else None,
         dry_run=True,
         status_interval_secs=status_interval,
+        position_manager=_position_mgr,
+        position_tracker=_position_tracker,
     )
 
     # 4. Sync initial balance

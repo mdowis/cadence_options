@@ -286,4 +286,11 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
         return_pct=return_pct,
     )
 
+    logger.info("%s: candidate %s %dDTE %s/%s-%s/%s credit=%.2f maxloss=%.2f "
+                "return=%.1f%% IVR=%.0f",
+                symbol, exp_str, dte,
+                long_put_strike, short_put_strike,
+                short_call_strike, long_call_strike,
+                credit, max_loss, return_pct, iv_rank)
+
     return [candidate]

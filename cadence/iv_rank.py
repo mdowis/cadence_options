@@ -75,6 +75,37 @@ def _history_start_str():
     return time.strftime("%Y-%m-%d", time.localtime(t))
 
 
+def _extract_price(quote):
+    """Pull a usable current price from a Tradier quote dict.
+
+    Tradier sometimes omits `last` on cash indices or during closed
+    sessions. Fall through a list of likely alternative fields.
+    """
+    if not quote:
+        return None
+    for key in ("last", "last_price", "close", "prevclose", "mark"):
+        val = quote.get(key)
+        if val is None:
+            continue
+        try:
+            f = float(val)
+            if f > 0:
+                return f
+        except (TypeError, ValueError):
+            continue
+    # Bid/ask midpoint as last resort
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    if bid is not None and ask is not None:
+        try:
+            b, a = float(bid), float(ask)
+            if b > 0 and a > 0:
+                return (b + a) / 2.0
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def get_iv_rank_from_index(trader, underlying, today_fn=None):
     """Fetch IV rank for an underlying using its volatility index.
 
@@ -83,31 +114,51 @@ def get_iv_rank_from_index(trader, underlying, today_fn=None):
        "source": "VIX"|"VXN"|..., "history_points": int}
     or None if no matching volatility index is available.
 
-    Raises nothing -- on API error, returns a dict with rank=0 and source="error".
+    Raises nothing -- on API error, returns a dict with rank=0 and
+    an `error` key describing what went wrong. If the live quote
+    endpoint doesn't produce a usable price, falls back to the most
+    recent close from the history series so we still get a value.
     """
     index_symbol = VOLATILITY_INDEX_SYMBOLS.get(underlying)
     if not index_symbol:
         return None
 
     try:
-        quote = trader.get_quote(index_symbol)
-        current_iv = quote.get("last")
-        if current_iv is None:
-            return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
-                    "source": index_symbol, "history_points": 0,
-                    "error": "no quote available"}
-
+        # Fetch history first -- we need it regardless, and we can use
+        # the latest close as a fallback for "current" if the live
+        # quote is missing or malformed.
         start = _history_start_str()
         end = time.strftime("%Y-%m-%d") if today_fn is None else today_fn()
         history = trader.get_history(
             index_symbol, interval="daily", start=start, end=end
         )
-        iv_values = [d.get("close") for d in history if d.get("close") is not None]
+        iv_values = []
+        for d in history:
+            c = d.get("close")
+            if c is None:
+                continue
+            try:
+                iv_values.append(float(c))
+            except (TypeError, ValueError):
+                continue
 
         if not iv_values:
-            return {"rank": 0.0, "current": current_iv, "min": 0, "max": 0,
+            return {"rank": 0.0, "current": 0, "min": 0, "max": 0,
                     "source": index_symbol, "history_points": 0,
-                    "error": "no history available"}
+                    "error": f"no history available for {index_symbol}"}
+
+        # Try the live quote; fall back to latest history close.
+        current_iv = None
+        current_source = index_symbol
+        try:
+            quote = trader.get_quote(index_symbol)
+            current_iv = _extract_price(quote)
+        except Exception as e:
+            logger.debug("Live quote for %s failed: %s", index_symbol, e)
+
+        if current_iv is None:
+            current_iv = iv_values[-1]
+            current_source = f"{index_symbol} (latest close)"
 
         rank = compute_iv_rank(current_iv, iv_values)
         return {
@@ -115,7 +166,7 @@ def get_iv_rank_from_index(trader, underlying, today_fn=None):
             "current": current_iv,
             "min": min(iv_values),
             "max": max(iv_values),
-            "source": index_symbol,
+            "source": current_source,
             "history_points": len(iv_values),
         }
     except Exception as e:

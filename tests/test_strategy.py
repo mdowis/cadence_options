@@ -14,6 +14,7 @@ from cadence.strategy import (
     _pick_expiration,
     _find_strike_by_delta,
     _find_option_at_strike,
+    _find_option_nearest_strike,
 )
 
 
@@ -107,6 +108,89 @@ class TestFindOptionAtStrike(unittest.TestCase):
         puts = [o for o in chain if o["option_type"] == "put"]
         result = _find_option_at_strike(puts, 999)
         self.assertIsNone(result)
+
+
+class TestFindOptionNearestStrike(unittest.TestCase):
+
+    def test_exact_match_within_tolerance(self):
+        chain = build_mock_chain()
+        puts = [o for o in chain if o["option_type"] == "put"]
+        result = _find_option_nearest_strike(puts, 425, max_distance=5)
+        self.assertEqual(result["strike"], 425)
+
+    def test_nearest_when_target_between_strikes(self):
+        # Target 557, available: 555 and 560 -> picks 555 (distance 2)
+        options = [
+            {"strike": 555, "option_type": "put"},
+            {"strike": 560, "option_type": "put"},
+        ]
+        result = _find_option_nearest_strike(options, 557, max_distance=5)
+        self.assertEqual(result["strike"], 555)
+
+    def test_returns_none_when_outside_tolerance(self):
+        options = [{"strike": 555, "option_type": "put"}]
+        result = _find_option_nearest_strike(options, 570, max_distance=5)
+        self.assertIsNone(result)
+
+    def test_empty_options(self):
+        self.assertIsNone(_find_option_nearest_strike([], 500, max_distance=5))
+
+
+class TestUnevenStrikeGrid(unittest.TestCase):
+    """Regression: QQQ and similar chains have uneven strike grids.
+    The exact wing target may not exist -- picking the nearest
+    available strike should still produce a valid iron condor."""
+
+    def _make_opt(self, symbol, strike, opt_type, bid, ask, delta):
+        return {
+            "symbol": symbol, "strike": strike, "option_type": opt_type,
+            "bid": bid, "ask": ask,
+            "greeks": {"delta": delta, "gamma": 0.01, "theta": -0.05,
+                       "vega": 0.15, "mid_iv": 0.25},
+        }
+
+    def test_qqq_uneven_grid_still_finds_candidate(self):
+        """QQQ-style chain: short strikes at 567/654, wings target
+        557/664 but only 555/665 are listed. Should still work."""
+        chain = []
+        # Puts in uneven grid (near ATM $1, further $5)
+        chain.append(self._make_opt("QQQ1", 555, "put", 1.20, 1.40, -0.08))
+        chain.append(self._make_opt("QQQ2", 560, "put", 1.60, 1.80, -0.11))
+        chain.append(self._make_opt("QQQ3", 565, "put", 2.30, 2.50, -0.14))
+        chain.append(self._make_opt("QQQ4", 567, "put", 2.60, 2.80, -0.16))  # 16-delta put
+        chain.append(self._make_opt("QQQ5", 570, "put", 3.20, 3.40, -0.20))
+        # Calls
+        chain.append(self._make_opt("QQQ6", 650, "call", 3.20, 3.40, 0.20))
+        chain.append(self._make_opt("QQQ7", 654, "call", 2.60, 2.80, 0.16))  # 16-delta call
+        chain.append(self._make_opt("QQQ8", 656, "call", 2.30, 2.50, 0.14))
+        chain.append(self._make_opt("QQQ9", 660, "call", 1.60, 1.80, 0.11))
+        chain.append(self._make_opt("QQQ10", 665, "call", 1.20, 1.40, 0.08))
+
+        trader = MagicMock()
+        trader.get_expirations.return_value = ["2026-05-28"]
+        trader.get_option_chain.return_value = chain
+
+        config = StrategyConfig(
+            target_dte=45, dte_tolerance_low=40, dte_tolerance_high=50,
+            target_delta=16, wing_width=10,
+            min_iv_rank=30, min_credit_pct_of_width=20,
+        )
+        today = date(2026, 4, 13)
+        candidates = find_iron_condor_candidates(
+            trader, "QQQ", config, iv_rank=50, today=today)
+
+        self.assertEqual(len(candidates), 1)
+        c = candidates[0]
+        self.assertEqual(c.short_put_strike, 567)
+        self.assertEqual(c.short_call_strike, 654)
+        # Target wings were 557/664. Nearest available: 555/665.
+        self.assertEqual(c.long_put_strike, 555)   # nearest to 557
+        self.assertEqual(c.long_call_strike, 665)  # nearest to 664
+        # Actual wing widths: 12 (put side), 11 (call side); max_loss
+        # uses the wider (12).
+        expected_credit = 2.60 + 2.60 - 1.40 - 1.40  # = 2.40
+        self.assertAlmostEqual(c.credit, expected_credit, places=2)
+        self.assertAlmostEqual(c.max_loss, 12 - expected_credit, places=2)
 
 
 class TestFindIronCondorCandidates(unittest.TestCase):

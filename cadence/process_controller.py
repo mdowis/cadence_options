@@ -196,6 +196,10 @@ class ProcessController:
                         else:
                             iv_rank = iv_info.get("rank", 0.0)
                             iv_ranks[symbol] = iv_info
+                            if iv_info.get("error"):
+                                logger.warning("IV rank for %s via %s: %s",
+                                               symbol, iv_info.get("source"),
+                                               iv_info["error"])
 
                         candidates = find_iron_condor_candidates(
                             self.trader, symbol, self.strategy_config, iv_rank

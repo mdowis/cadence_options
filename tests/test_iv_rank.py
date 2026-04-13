@@ -140,12 +140,19 @@ class TestGetIVRankFromIndex(unittest.TestCase):
         self.assertEqual(result["source"], "VXN")
         trader.get_quote.assert_called_once_with("VXN")
 
-    def test_no_quote_returns_error_dict(self):
+    def test_no_quote_falls_back_to_latest_close(self):
+        """When the live quote is unusable, fall back to the latest
+        history close so IV rank is still computable."""
         trader = MagicMock()
-        trader.get_quote.return_value = {}
+        trader.get_quote.return_value = {}  # no usable fields
+        trader.get_history.return_value = [
+            {"close": 12.0}, {"close": 18.0}, {"close": 20.0},
+        ]
         result = get_iv_rank_from_index(trader, "SPY")
-        self.assertEqual(result["rank"], 0.0)
-        self.assertIn("error", result)
+        # current = 20 (latest close), range [12..20] -> rank = 100
+        self.assertEqual(result["current"], 20.0)
+        self.assertAlmostEqual(result["rank"], 100.0, places=1)
+        self.assertIn("latest close", result["source"])
 
     def test_empty_history_returns_error_dict(self):
         trader = MagicMock()
@@ -153,15 +160,33 @@ class TestGetIVRankFromIndex(unittest.TestCase):
         trader.get_history.return_value = []
         result = get_iv_rank_from_index(trader, "SPY")
         self.assertEqual(result["rank"], 0.0)
-        self.assertEqual(result["current"], 18.0)
         self.assertIn("error", result)
+        self.assertIn("no history", result["error"])
 
     def test_api_error_returns_error_dict(self):
         trader = MagicMock()
-        trader.get_quote.side_effect = RuntimeError("API down")
+        trader.get_history.side_effect = RuntimeError("API down")
         result = get_iv_rank_from_index(trader, "SPY")
         self.assertEqual(result["rank"], 0.0)
         self.assertIn("API down", result["error"])
+
+    def test_quote_price_missing_last_but_has_close(self):
+        """If `last` is null but `close` is present, use close."""
+        trader = MagicMock()
+        trader.get_quote.return_value = {"last": None, "close": 16.5}
+        trader.get_history.return_value = [{"close": 10.0}, {"close": 20.0}]
+        result = get_iv_rank_from_index(trader, "SPY")
+        self.assertEqual(result["current"], 16.5)
+        self.assertAlmostEqual(result["rank"], 65.0, places=1)
+        self.assertNotIn("latest close", result["source"])
+
+    def test_bid_ask_midpoint_fallback(self):
+        """If only bid/ask are available, use midpoint."""
+        trader = MagicMock()
+        trader.get_quote.return_value = {"bid": 15.0, "ask": 17.0}
+        trader.get_history.return_value = [{"close": 10.0}, {"close": 20.0}]
+        result = get_iv_rank_from_index(trader, "SPY")
+        self.assertEqual(result["current"], 16.0)
 
 
 class TestGetAtmIVFromChain(unittest.TestCase):

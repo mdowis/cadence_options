@@ -122,6 +122,30 @@ def _find_option_at_strike(options, strike):
     return None
 
 
+def _find_option_nearest_strike(options, target_strike, max_distance):
+    """Find the option with strike closest to target, within max_distance.
+
+    QQQ and some other chains have uneven strike grids -- $1 increments
+    near ATM, $5 further out -- so the exact wing target (short - 10)
+    may not exist as a listed strike. We pick the nearest available
+    within a reasonable tolerance (typically half the wing width).
+    Returns None if no strike is within range.
+    """
+    best = None
+    best_dist = float("inf")
+    for opt in options:
+        strike = opt.get("strike")
+        if strike is None:
+            continue
+        dist = abs(strike - target_strike)
+        if dist < best_dist:
+            best = opt
+            best_dist = dist
+    if best is None or best_dist > max_distance:
+        return None
+    return best
+
+
 def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
     """Scan for iron condor candidates.
 
@@ -169,17 +193,30 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
     short_put_strike = short_put["strike"]
     short_call_strike = short_call["strike"]
 
-    # 6-7. Long strikes
-    long_put_strike = short_put_strike - config.wing_width
-    long_call_strike = short_call_strike + config.wing_width
+    # 6-7. Long strikes -- target is short strike +/- wing_width, but
+    # chains (especially QQQ) have uneven strike grids, so pick the
+    # nearest available strike within a tolerance of half the wing width.
+    long_put_target = short_put_strike - config.wing_width
+    long_call_target = short_call_strike + config.wing_width
+    wing_tolerance = max(config.wing_width * 0.5, 2.5)
 
-    long_put = _find_option_at_strike(puts, long_put_strike)
-    long_call = _find_option_at_strike(calls, long_call_strike)
+    long_put = _find_option_nearest_strike(
+        puts, long_put_target, max_distance=wing_tolerance)
+    long_call = _find_option_nearest_strike(
+        calls, long_call_target, max_distance=wing_tolerance)
 
     if not long_put or not long_call:
-        logger.info("%s: could not find wing strikes at %s/%s",
-                    symbol, long_put_strike, long_call_strike)
+        logger.info("%s: could not find wing strikes near %s/%s "
+                    "(tolerance +/-%.1f)",
+                    symbol, long_put_target, long_call_target, wing_tolerance)
         return []
+
+    long_put_strike = long_put["strike"]
+    long_call_strike = long_call["strike"]
+    put_wing_width = short_put_strike - long_put_strike
+    call_wing_width = long_call_strike - short_call_strike
+    # Iron condor max loss is set by the wider wing
+    effective_wing_width = max(put_wing_width, call_wing_width)
 
     # 8. Credit calculation
     short_put_bid = short_put.get("bid", 0) or 0
@@ -193,8 +230,8 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
         logger.info("%s: negative credit %.2f", symbol, credit)
         return []
 
-    # 9. Max loss = wing width - credit (per share)
-    max_loss = config.wing_width - credit
+    # 9. Max loss = effective wing width - credit (per share)
+    max_loss = effective_wing_width - credit
 
     if max_loss <= 0:
         logger.info("%s: non-positive max loss (credit exceeds wing width)", symbol)
@@ -215,10 +252,11 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
     return_pct = (credit / max_loss) * 100 if max_loss > 0 else 0
 
     # 10. Filters
-    min_credit = config.min_credit_pct_of_width / 100.0 * config.wing_width
+    min_credit = config.min_credit_pct_of_width / 100.0 * effective_wing_width
     if credit < min_credit:
-        logger.info("%s: credit %.2f below minimum %.2f (%.0f%% of width)",
-                    symbol, credit, min_credit, config.min_credit_pct_of_width)
+        logger.info("%s: credit %.2f below minimum %.2f (%.0f%% of width %.1f)",
+                    symbol, credit, min_credit,
+                    config.min_credit_pct_of_width, effective_wing_width)
         return []
 
     if iv_rank < config.min_iv_rank:

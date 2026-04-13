@@ -79,7 +79,11 @@ All settings via `.env` file. See `.env.example` for full list.
 Key settings:
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TRADIER_ENV` | `sandbox` | `sandbox` or `production` |
+| `TRADIER_ENV` | `sandbox` | `sandbox` or `production` -- selects which credentials below to use |
+| `TRADIER_SANDBOX_ACCESS_TOKEN` | | Token for Tradier sandbox |
+| `TRADIER_SANDBOX_ACCOUNT_ID` | | Account ID for Tradier sandbox |
+| `TRADIER_PRODUCTION_ACCESS_TOKEN` | | Token for Tradier production (live money) |
+| `TRADIER_PRODUCTION_ACCOUNT_ID` | | Account ID for Tradier production |
 | `CADENCE_SYMBOLS` | `SPY,QQQ` | Comma-separated symbols |
 | `CADENCE_MAX_DRAWDOWN_PCT` | `10` | Kill switch threshold |
 | `CADENCE_DRAWDOWN_REFERENCE` | `session_start` | `session_start` or `peak` |
@@ -119,7 +123,7 @@ Dangerous: `/exec_live` (requires CONFIRM reply within 30s)
 python3 -m pytest
 ```
 
-287 unit tests covering all modules. Live sandbox tests run when `TRADIER_ACCESS_TOKEN` and `TRADIER_ACCOUNT_ID` are set.
+296 unit tests covering all modules. Live sandbox tests run when `TRADIER_SANDBOX_ACCESS_TOKEN` (or legacy `TRADIER_ACCESS_TOKEN`) and matching account ID are set.
 
 ## IV Rank
 

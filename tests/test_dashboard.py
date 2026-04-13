@@ -4,9 +4,10 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from dashboard import load_dotenv, _load_env_file, _mask
+from dashboard import load_dotenv, _load_env_file, _mask, _resolve_tradier_creds
 
 
 class TestLoadDotenv(unittest.TestCase):
@@ -83,6 +84,103 @@ class TestMask(unittest.TestCase):
 
     def test_masks_none(self):
         self.assertEqual(_mask(None), "***")
+
+
+class TestResolveTradierCreds(unittest.TestCase):
+    """Verify env-specific credentials take precedence with legacy fallback."""
+
+    TRADIER_VARS = [
+        "TRADIER_ACCESS_TOKEN", "TRADIER_ACCOUNT_ID",
+        "TRADIER_SANDBOX_ACCESS_TOKEN", "TRADIER_SANDBOX_ACCOUNT_ID",
+        "TRADIER_PRODUCTION_ACCESS_TOKEN", "TRADIER_PRODUCTION_ACCOUNT_ID",
+    ]
+
+    def _clean_env(self):
+        """Return a dict with all Tradier vars cleared."""
+        env = dict(os.environ)
+        for k in self.TRADIER_VARS:
+            env.pop(k, None)
+        return env
+
+    def test_sandbox_uses_sandbox_specific(self):
+        env = self._clean_env()
+        env["TRADIER_SANDBOX_ACCESS_TOKEN"] = "sbx-token"
+        env["TRADIER_SANDBOX_ACCOUNT_ID"] = "sbx-acct"
+        env["TRADIER_PRODUCTION_ACCESS_TOKEN"] = "prd-token"
+        env["TRADIER_PRODUCTION_ACCOUNT_ID"] = "prd-acct"
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("sandbox")
+        self.assertEqual(token, "sbx-token")
+        self.assertEqual(acct, "sbx-acct")
+        self.assertEqual(source, "env-specific")
+
+    def test_production_uses_production_specific(self):
+        env = self._clean_env()
+        env["TRADIER_SANDBOX_ACCESS_TOKEN"] = "sbx-token"
+        env["TRADIER_SANDBOX_ACCOUNT_ID"] = "sbx-acct"
+        env["TRADIER_PRODUCTION_ACCESS_TOKEN"] = "prd-token"
+        env["TRADIER_PRODUCTION_ACCOUNT_ID"] = "prd-acct"
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("production")
+        self.assertEqual(token, "prd-token")
+        self.assertEqual(acct, "prd-acct")
+        self.assertEqual(source, "env-specific")
+
+    def test_legacy_fallback_when_env_specific_missing(self):
+        env = self._clean_env()
+        env["TRADIER_ACCESS_TOKEN"] = "legacy-token"
+        env["TRADIER_ACCOUNT_ID"] = "legacy-acct"
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("sandbox")
+        self.assertEqual(token, "legacy-token")
+        self.assertEqual(acct, "legacy-acct")
+        self.assertEqual(source, "legacy")
+
+    def test_env_specific_wins_over_legacy(self):
+        """If both env-specific and legacy are set, env-specific wins."""
+        env = self._clean_env()
+        env["TRADIER_SANDBOX_ACCESS_TOKEN"] = "sbx-token"
+        env["TRADIER_SANDBOX_ACCOUNT_ID"] = "sbx-acct"
+        env["TRADIER_ACCESS_TOKEN"] = "legacy-token"
+        env["TRADIER_ACCOUNT_ID"] = "legacy-acct"
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("sandbox")
+        self.assertEqual(token, "sbx-token")
+        self.assertEqual(source, "env-specific")
+
+    def test_no_credentials_returns_empty(self):
+        env = self._clean_env()
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("sandbox")
+        self.assertEqual(token, "")
+        self.assertEqual(acct, "")
+        self.assertEqual(source, "none")
+
+    def test_partial_env_specific_falls_back(self):
+        """If only the token (not account) is set for the env, fall back to legacy."""
+        env = self._clean_env()
+        env["TRADIER_SANDBOX_ACCESS_TOKEN"] = "sbx-token"
+        # missing TRADIER_SANDBOX_ACCOUNT_ID
+        env["TRADIER_ACCESS_TOKEN"] = "legacy-token"
+        env["TRADIER_ACCOUNT_ID"] = "legacy-acct"
+        with patch.dict(os.environ, env, clear=True):
+            token, acct, source = _resolve_tradier_creds("sandbox")
+        self.assertEqual(token, "legacy-token")
+        self.assertEqual(acct, "legacy-acct")
+        self.assertEqual(source, "legacy")
+
+    def test_switching_env_picks_correct_creds(self):
+        """Same configured env vars, different TRADIER_ENV -> different creds."""
+        env = self._clean_env()
+        env["TRADIER_SANDBOX_ACCESS_TOKEN"] = "sbx-token"
+        env["TRADIER_SANDBOX_ACCOUNT_ID"] = "sbx-acct"
+        env["TRADIER_PRODUCTION_ACCESS_TOKEN"] = "prd-token"
+        env["TRADIER_PRODUCTION_ACCOUNT_ID"] = "prd-acct"
+        with patch.dict(os.environ, env, clear=True):
+            sbx = _resolve_tradier_creds("sandbox")
+            prd = _resolve_tradier_creds("production")
+        self.assertNotEqual(sbx[0], prd[0])
+        self.assertNotEqual(sbx[1], prd[1])
 
 
 if __name__ == "__main__":

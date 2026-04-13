@@ -82,6 +82,34 @@ def _env_int(key, default=0):
         return default
 
 
+def _resolve_tradier_creds(tradier_env):
+    """Pick the right Tradier token/account pair for the given env.
+
+    Preference:
+      1. TRADIER_{ENV_UPPER}_ACCESS_TOKEN / TRADIER_{ENV_UPPER}_ACCOUNT_ID
+      2. TRADIER_ACCESS_TOKEN / TRADIER_ACCOUNT_ID (legacy fallback)
+
+    Returns (token, account_id, source) where source is one of
+    "env-specific", "legacy", or "none" for diagnostics.
+    """
+    env_upper = tradier_env.upper()
+    specific_token = _env(f"TRADIER_{env_upper}_ACCESS_TOKEN")
+    specific_acct = _env(f"TRADIER_{env_upper}_ACCOUNT_ID")
+
+    if specific_token and specific_acct:
+        return specific_token, specific_acct, "env-specific"
+
+    legacy_token = _env("TRADIER_ACCESS_TOKEN")
+    legacy_acct = _env("TRADIER_ACCOUNT_ID")
+    if legacy_token and legacy_acct:
+        return legacy_token, legacy_acct, "legacy"
+
+    # Prefer env-specific if only one is set, otherwise legacy
+    token = specific_token or legacy_token
+    acct = specific_acct or legacy_acct
+    return token, acct, "none"
+
+
 def _env_float(key, default=0.0):
     try:
         return float(_env(key, str(default)))
@@ -199,13 +227,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(data)
 
         elif path == "/api/diagnostics":
-            token = _env("TRADIER_ACCESS_TOKEN")
-            acct = _env("TRADIER_ACCOUNT_ID")
+            tradier_env = _env("TRADIER_ENV", "sandbox")
+            token, acct, cred_source = _resolve_tradier_creds(tradier_env)
             self._send_json({
                 "env_path": _env_path or "NOT FOUND",
-                "tradier_env": _env("TRADIER_ENV", "sandbox"),
+                "tradier_env": tradier_env,
+                "credentials_source": cred_source,
                 "token": _mask(token),
                 "account_id": _mask(acct),
+                "sandbox_configured": bool(
+                    _env("TRADIER_SANDBOX_ACCESS_TOKEN") and
+                    _env("TRADIER_SANDBOX_ACCOUNT_ID")),
+                "production_configured": bool(
+                    _env("TRADIER_PRODUCTION_ACCESS_TOKEN") and
+                    _env("TRADIER_PRODUCTION_ACCOUNT_ID")),
                 "authenticated": _trader.authenticated if _trader else False,
                 "scanner": _process_ctrl.get_status()["scanner"] if _process_ctrl else {},
                 "executor": _process_ctrl.get_status()["executor"] if _process_ctrl else {},
@@ -412,10 +447,10 @@ def main():
     print(f"[Cadence] .env: {_env_path or 'NOT FOUND (checked ' + os.getcwd() + ' and ' + _script_dir + ')'}")
 
     # 2. Print diagnostics
-    token = _env("TRADIER_ACCESS_TOKEN")
-    acct = _env("TRADIER_ACCOUNT_ID")
     tradier_env = _env("TRADIER_ENV", "sandbox")
+    token, acct, cred_source = _resolve_tradier_creds(tradier_env)
     print(f"[Cadence] Tradier env: {tradier_env}")
+    print(f"[Cadence] Credentials source: {cred_source}")
     print(f"[Cadence] Token: {_mask(token)}")
     print(f"[Cadence] Account: {_mask(acct)}")
 

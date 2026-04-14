@@ -13,8 +13,10 @@ from cadence.executor import (
     execute_candidate,
     execute_close,
     compute_close_debit,
+    compute_close_debit_mid,
     _validate_leg_count,
     _format_order_summary,
+    _opt_mid,
 )
 from cadence.position_tracker import TrackedPosition
 from cadence.risk_manager import RiskManager, RiskConfig, RiskAction
@@ -294,6 +296,68 @@ class TestComputeCloseDebit(unittest.TestCase):
         debit, _ = compute_close_debit(trader, t)
         # All four legs missing -> returns None (can't price)
         self.assertIsNone(debit)
+
+
+class TestOptMid(unittest.TestCase):
+
+    def test_basic_midpoint(self):
+        self.assertEqual(_opt_mid({"bid": 1.00, "ask": 2.00}), 1.50)
+
+    def test_falls_back_to_last(self):
+        # Missing bid -> use last
+        self.assertEqual(_opt_mid({"last": 1.50}), 1.50)
+
+    def test_zero_bid_falls_back(self):
+        self.assertEqual(_opt_mid({"bid": 0, "ask": 0, "mark": 1.25}), 1.25)
+
+    def test_empty_returns_zero(self):
+        self.assertEqual(_opt_mid({}), 0.0)
+
+
+class TestComputeCloseDebitMid(unittest.TestCase):
+    """Midpoint pricing should be less pessimistic than bid/ask."""
+
+    def _chain_option(self, sym, bid, ask):
+        return {"symbol": sym, "bid": bid, "ask": ask}
+
+    def test_midpoint_is_between_bid_ask_close(self):
+        trader = MagicMock()
+        trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.40, 0.60),
+            self._chain_option("SPY260530P00425000", 0.10, 0.20),
+            self._chain_option("SPY260530C00465000", 0.30, 0.50),
+            self._chain_option("SPY260530C00475000", 0.05, 0.15),
+        ]
+        t = _tracked_position()
+        debit_mid, _ = compute_close_debit_mid(trader, t)
+        debit_worst, _ = compute_close_debit(trader, t)
+        # mid: 0.50 + 0.40 - 0.15 - 0.10 = 0.65
+        # worst: 0.60 + 0.50 - 0.10 - 0.05 = 0.95
+        self.assertAlmostEqual(debit_mid, 0.65, places=2)
+        self.assertAlmostEqual(debit_worst, 0.95, places=2)
+        # Midpoint should always be less than the worst-case debit
+        # (which is what closes the gap between phantom losses on the
+        # dashboard and the real economic value of the position).
+        self.assertLess(debit_mid, debit_worst)
+
+    def test_pnl_using_mid_is_more_favorable(self):
+        """If entry credit was 2.40 and current spread is wide,
+        midpoint debit gives a better (less pessimistic) P&L."""
+        trader = MagicMock()
+        trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.80, 1.40),  # wide
+            self._chain_option("SPY260530P00425000", 0.10, 0.40),
+            self._chain_option("SPY260530C00465000", 0.70, 1.30),
+            self._chain_option("SPY260530C00475000", 0.05, 0.30),
+        ]
+        t = _tracked_position()
+        t.entry_credit = 2.40
+        d_mid, _ = compute_close_debit_mid(trader, t)
+        d_worst, _ = compute_close_debit(trader, t)
+        # Midpoint P&L should be more favorable than worst-case
+        pnl_mid = (t.entry_credit - d_mid) * 100
+        pnl_worst = (t.entry_credit - d_worst) * 100
+        self.assertGreater(pnl_mid, pnl_worst)
 
 
 class TestExecuteClose(unittest.TestCase):

@@ -241,8 +241,10 @@ tr:hover td { background: rgba(59,130,246,0.03); }
     <div class="stat-value" id="s-exposure">--</div>
     <div class="stat-sub" id="s-exposure-sub">--</div>
   </div>
-  <div class="stat-card" style="border-top-color:var(--blue)">
-    <div class="stat-label">Open Positions</div>
+  <div class="stat-card" style="border-top-color:var(--blue)"
+       title="Per-leg count from Tradier. One iron condor = 4 legs.
+Multiple ICs sharing the same legs are aggregated by Tradier.">
+    <div class="stat-label">Open Legs (broker)</div>
     <div class="stat-value" id="s-positions">--</div>
     <div class="stat-sub" id="s-positions-sub">--</div>
   </div>
@@ -315,20 +317,23 @@ tr:hover td { background: rgba(59,130,246,0.03); }
     </div>
   </div>
 
-  <!-- Open Iron Condors (tracker view, one row per IC) -->
+  <!-- Open Iron Condors (tracker view, one row per entry order) -->
   <div class="panel">
-    <div class="panel-title">Open Iron Condors</div>
+    <div class="panel-title" title="One row per entry order placed.
+Multiple rows with the same strikes/expiration are separate orders
+that share legs at the broker.">Open Iron Condors (tracker)</div>
     <table>
       <thead>
         <tr>
           <th>Ticker</th><th>Exp</th><th>DTE</th>
           <th>Put Spread</th><th>Call Spread</th>
-          <th>Credit</th><th>Current</th><th>P&amp;L</th>
-          <th>P&amp;L%</th><th></th>
+          <th>Qty</th>
+          <th>Entry</th><th>Mid</th><th>P&amp;L</th>
+          <th>P&amp;L%</th><th>Tag</th><th></th>
         </tr>
       </thead>
       <tbody id="tracked-body">
-        <tr><td colspan="10" class="empty-row">No open iron condors</td></tr>
+        <tr><td colspan="12" class="empty-row">No open iron condors</td></tr>
       </tbody>
     </table>
   </div>
@@ -879,13 +884,17 @@ function toggleCandidate(i) {
   if (window._lastCandidates) renderCandidates(window._lastCandidates);
 }
 
-// ---- Tracked iron condors (one row per IC with P&L) ----
+// ---- Tracked iron condors (one row per entry order with P&L at midpoint) ----
 function renderTracked(tracked) {
   var tbody = el('tracked-body');
   if (!tracked || tracked.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No open iron condors</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-row">No open iron condors</td></tr>';
     return;
   }
+  // Compute total contracts so the operator can see legs vs ICs at a glance
+  var totalContracts = tracked.reduce(function(a, p) {
+    return a + (p.contracts || 0);
+  }, 0);
   tbody.innerHTML = tracked.map(function(p) {
     var pnl = p.pnl_dollars;
     var pnlPct = p.pnl_pct;
@@ -896,19 +905,30 @@ function renderTracked(tracked) {
     var pnlStr = pnl == null ? '--' : '$' + pnl.toFixed(2);
     var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
     var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
-    return '<tr>' +
+    var tag = p.tag || '';
+    var tagShort = tag.length > 14 ? tag.substring(0, 14) + '..' : tag;
+    return '<tr title="tag=' + esc(tag) + '">' +
       '<td>' + esc(p.symbol || '--') + '</td>' +
       '<td>' + esc(p.expiration || '--') + '</td>' +
       '<td style="color:' + dteColor + '">' + (dte != null ? dte : '--') + '</td>' +
       '<td>' + (p.long_put_strike || '--') + '/' + (p.short_put_strike || '--') + '</td>' +
       '<td>' + (p.short_call_strike || '--') + '/' + (p.long_call_strike || '--') + '</td>' +
+      '<td>' + (p.contracts || 1) + '</td>' +
       '<td>$' + (p.entry_credit != null ? p.entry_credit.toFixed(2) : '--') + '</td>' +
       '<td>' + currentStr + '</td>' +
       '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
-      '<td><button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(p.tag || '') + '\')">Close</button></td>' +
+      '<td style="font-size:10px;color:var(--dim);font-family:var(--font)">' + esc(tagShort) + '</td>' +
+      '<td><button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(tag) + '\')">Close</button></td>' +
       '</tr>';
   }).join('');
+  // Add a footer row summarizing the totals
+  if (tracked.length > 1) {
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--border)">' +
+      '<td colspan="5" style="color:var(--dim);font-size:11px">' +
+      tracked.length + ' tracker entries, ' + totalContracts + ' total contracts</td>' +
+      '<td colspan="7"></td></tr>';
+  }
 }
 
 function closeTracked(tag) {

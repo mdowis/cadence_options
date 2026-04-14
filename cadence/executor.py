@@ -53,23 +53,16 @@ def _safe_float(v):
         return 0.0
 
 
-def compute_close_debit(trader, tracked):
-    """Fetch the option chain for a tracked position's expiration and
-    compute the per-share debit required to close.
-
-    To close an iron condor we:
-      - buy back the two shorts (pay ask)
-      - sell the two longs (receive bid)
-
-    Returns (debit, chain_by_symbol) or (None, None) on failure.
-    """
+def _legs_from_chain(trader, tracked):
+    """Fetch chain and return (sp, lp, sc, lc, by_sym) opt dicts.
+    Each opt dict may be {} if the symbol isn't in the chain."""
     try:
         chain = trader.get_option_chain(
             tracked.symbol, tracked.expiration, greeks=False)
     except Exception as e:
-        logger.warning("Close-debit chain fetch for %s %s failed: %s",
+        logger.warning("Chain fetch for %s %s failed: %s",
                        tracked.symbol, tracked.expiration, e)
-        return None, None
+        return None, None, None, None, None
 
     by_sym = {}
     for o in chain:
@@ -77,18 +70,71 @@ def compute_close_debit(trader, tracked):
         if sym:
             by_sym[sym] = o
 
-    sp = by_sym.get(tracked.short_put_symbol, {})
-    lp = by_sym.get(tracked.long_put_symbol, {})
-    sc = by_sym.get(tracked.short_call_symbol, {})
-    lc = by_sym.get(tracked.long_call_symbol, {})
+    return (by_sym.get(tracked.short_put_symbol, {}),
+            by_sym.get(tracked.long_put_symbol, {}),
+            by_sym.get(tracked.short_call_symbol, {}),
+            by_sym.get(tracked.long_call_symbol, {}),
+            by_sym)
+
+
+def _opt_mid(opt):
+    """Midpoint of an option's bid/ask. Falls back to last/mark if
+    bid or ask is missing."""
+    bid = _safe_float(opt.get("bid"))
+    ask = _safe_float(opt.get("ask"))
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    # Fall back to last or mark when bid/ask is incomplete
+    for k in ("last", "mark", "close"):
+        v = _safe_float(opt.get(k))
+        if v > 0:
+            return v
+    return 0.0
+
+
+def compute_close_debit(trader, tracked):
+    """Fetch the option chain and compute the per-share debit required
+    to close at the worst-case (crossing the spread) price.
+
+    Used for ACTUAL close-order limit pricing -- if we submit at this
+    debit, we're guaranteed to fill at this price or better.
+
+      buy back shorts (pay ask) + sell longs (receive bid)
+
+    Returns (debit, chain_by_symbol) or (None, None) on failure.
+    """
+    sp, lp, sc, lc, by_sym = _legs_from_chain(trader, tracked)
+    if sp is None:
+        return None, None
 
     debit = (_safe_float(sp.get("ask"))
              + _safe_float(sc.get("ask"))
              - _safe_float(lp.get("bid"))
              - _safe_float(lc.get("bid")))
-    # Guard against malformed chain: all zeros means we couldn't price
+    # Guard against malformed chain: all empty means we couldn't price
     # this position -- better to return None than submit a $0 debit.
     if debit <= 0 and all(o == {} for o in (sp, lp, sc, lc)):
+        return None, by_sym
+    return debit, by_sym
+
+
+def compute_close_debit_mid(trader, tracked):
+    """Per-share debit at MIDPOINT pricing -- the fair mark for
+    unrealized P&L display. Less pessimistic than compute_close_debit
+    which uses bid/ask boundaries.
+
+    Why two functions: actual close orders use the conservative
+    (cross-the-spread) price so we know we'll fill, but marking-to-
+    market for the dashboard should use the fair value (midpoint)
+    or P&L will look chronically negative on wide spreads.
+
+    Returns (debit, chain_by_symbol) or (None, None) on failure.
+    """
+    sp, lp, sc, lc, by_sym = _legs_from_chain(trader, tracked)
+    if sp is None:
+        return None, None
+    debit = _opt_mid(sp) + _opt_mid(sc) - _opt_mid(lp) - _opt_mid(lc)
+    if debit == 0 and all(o == {} for o in (sp, lp, sc, lc)):
         return None, by_sym
     return debit, by_sym
 

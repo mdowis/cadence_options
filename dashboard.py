@@ -308,8 +308,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/tracked-positions":
             # Our own view of open iron condors with unrealized P&L.
-            # More useful than Tradier's per-leg /api/positions view.
-            from cadence.executor import compute_close_debit
+            # P&L uses MIDPOINT close debit (fair mark) so the
+            # dashboard isn't chronically pessimistic on wide spreads.
+            # Real close orders still price at the conservative bid/ask
+            # boundary -- see compute_close_debit.
+            from cadence.executor import compute_close_debit_mid
             tracked_info = []
             if _position_tracker and _trader and _trader.authenticated:
                 for t in _position_tracker.get_open():
@@ -317,7 +320,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     pnl_dollars = None
                     pnl_pct = None
                     try:
-                        debit, _ = compute_close_debit(_trader, t)
+                        debit, _ = compute_close_debit_mid(_trader, t)
                     except Exception:
                         debit = None
                     if debit is not None and t.entry_credit > 0:
@@ -331,7 +334,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "dte": t.current_dte(),
                         "contracts": t.contracts,
                         "entry_credit": t.entry_credit,
-                        "current_debit": debit,
+                        "current_debit": debit,  # midpoint
                         "pnl_dollars": pnl_dollars,
                         "pnl_pct": pnl_pct,
                         "short_put_strike": t.short_put_strike,

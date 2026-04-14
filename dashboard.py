@@ -755,7 +755,15 @@ def main():
 
         _notifier.notify_startup(detail=f"env={tradier_env}, auth={_trader.authenticated}")
 
-    # 6. Auto-start scanner
+    # 6. Start the broker sync loop unconditionally so dashboard stats
+    # stay fresh even outside market hours and when the scanner is
+    # stopped. Independent of the scanner cycle.
+    if _trader.authenticated:
+        sync_interval = _env_int("CADENCE_BROKER_SYNC_INTERVAL", 30)
+        _process_ctrl.start_broker_sync(interval=sync_interval)
+        print(f"[Cadence] Broker sync running every {sync_interval}s")
+
+    # Auto-start scanner
     if _trader.authenticated and _env_bool("CADENCE_AUTOSTART_SCANNER", True):
         _process_ctrl.start_scanner()
         print("[Cadence] Scanner auto-started")
@@ -784,6 +792,7 @@ def main():
         print("\n[Cadence] Shutting down...")
         _process_ctrl.stop_scanner()
         _process_ctrl.stop_executor()
+        _process_ctrl.stop_broker_sync()
         if _notifier and _notifier.enabled:
             _notifier.notify_shutdown()
             _notifier.stop()

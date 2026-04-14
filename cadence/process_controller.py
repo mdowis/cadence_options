@@ -103,6 +103,13 @@ class ProcessController:
         self._scanner_stop = threading.Event()
         self._executor_stop = threading.Event()
 
+        # Broker-sync runs independently of scanner/executor so the
+        # dashboard stays fresh outside market hours and when the
+        # scanner is stopped.
+        self._sync_thread = None
+        self._sync_stop = threading.Event()
+        self._sync_interval = 30  # seconds; updated by start_broker_sync
+
         self._candidates_lock = threading.Lock()
         self._candidates = []
         self._iv_ranks = {}  # symbol -> {rank, current, min, max, source, ...}
@@ -153,6 +160,39 @@ class ProcessController:
         self._executor_stop.set()
         self._executor_status.status = "stopped"
         logger.info("Executor stopped")
+
+    # -- Broker sync control -------------------------------------------------
+
+    def start_broker_sync(self, interval=30):
+        """Start the periodic broker-sync thread. Pulls equity, positions,
+        Greeks from the broker every `interval` seconds regardless of
+        market hours or scanner state. Keeps the dashboard fresh so
+        operators see real numbers even when the scanner is idle."""
+        if self._sync_thread and self._sync_thread.is_alive():
+            return
+        self._sync_interval = interval
+        self._sync_stop.clear()
+        self._sync_thread = threading.Thread(
+            target=self._broker_sync_loop, daemon=True, name="broker-sync"
+        )
+        self._sync_thread.start()
+        logger.info("Broker sync started (interval=%ds)", interval)
+
+    def stop_broker_sync(self):
+        self._sync_stop.set()
+        logger.info("Broker sync stopped")
+
+    def _broker_sync_loop(self):
+        """Periodically refresh broker state. Runs forever (until stopped)
+        regardless of market hours -- balance and positions can change
+        from external activity (manual orders, expirations, dividends,
+        wires) outside of market hours."""
+        while not self._sync_stop.is_set():
+            try:
+                self._sync_broker_state()
+            except Exception as e:
+                logger.warning("Broker sync loop error: %s", e)
+            self._sync_stop.wait(self._sync_interval)
 
     # -- Status --------------------------------------------------------------
 

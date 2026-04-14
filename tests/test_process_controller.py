@@ -333,6 +333,51 @@ class TestAutoExitLoop(unittest.TestCase):
         self.pc._check_and_submit_exits()
 
 
+class TestBrokerSyncThread(unittest.TestCase):
+    """Verify the dedicated broker-sync thread runs independently of
+    market hours and scanner state."""
+
+    def setUp(self):
+        self.trader = MagicMock()
+        self.trader.get_account_balances.return_value = {
+            "balances": {"total_equity": 10000.00, "total_cash": 8000.00}
+        }
+        self.trader.get_positions.return_value = []
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=0)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, scan_interval=60,
+        )
+
+    def test_start_runs_sync_immediately(self):
+        # Use a very short interval so the test finishes quickly
+        self.pc.start_broker_sync(interval=0.05)
+        time.sleep(0.15)
+        self.pc.stop_broker_sync()
+        # Should have called get_account_balances at least once
+        self.assertGreaterEqual(self.trader.get_account_balances.call_count, 1)
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["equity"]["current"], 1000000)
+
+    def test_runs_outside_market_hours(self):
+        """Even when is_market_open() returns False, broker sync runs."""
+        with patch("cadence.process_controller.is_market_open",
+                   return_value=False):
+            self.pc.start_broker_sync(interval=0.05)
+            time.sleep(0.15)
+            self.pc.stop_broker_sync()
+        # Sync ran despite market being "closed"
+        self.assertGreaterEqual(self.trader.get_account_balances.call_count, 1)
+
+    def test_double_start_doesnt_spawn_two_threads(self):
+        self.pc.start_broker_sync(interval=0.5)
+        first = self.pc._sync_thread
+        self.pc.start_broker_sync(interval=0.5)
+        second = self.pc._sync_thread
+        self.assertIs(first, second)
+        self.pc.stop_broker_sync()
+
+
 class TestSetDryRun(unittest.TestCase):
 
     def test_toggle(self):

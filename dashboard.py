@@ -495,6 +495,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 _trader, tracked, limit_debit=debit,
                 dry_run=dry, reason="manual",
             )
+            # Trigger an immediate broker sync so the dashboard reflects
+            # the close within ~1 second (instead of waiting for the
+            # next periodic sync). Skip in dry-run since nothing changed
+            # at the broker.
+            if ok and not dry and _process_ctrl:
+                try:
+                    _process_ctrl._sync_broker_state()
+                except Exception as e:
+                    logger.warning("Post-close sync failed: %s", e)
             self._send_json({"ok": ok, "detail": detail,
                              "close_debit": debit, "dry_run": dry})
 
@@ -718,18 +727,26 @@ def main():
     tracker_state_file = _env("CADENCE_TRACKER_STATE_FILE", "position_tracker.json")
     _position_tracker = PositionTracker(state_file=tracker_state_file or None)
 
-    # Process controller
+    # Process controller. Persist its state (currently just dry_run)
+    # so toggling to PAPER or LIVE survives a restart instead of
+    # silently reverting to dry_run -- which would cause Close button
+    # clicks to log [DRY RUN] and never actually close at the broker.
     status_interval = _env_int("CADENCE_TELEGRAM_STATUS_INTERVAL", 3600)
+    executor_state_file = _env("CADENCE_EXECUTOR_STATE_FILE",
+                                "executor_state.json")
     _process_ctrl = ProcessController(
         trader=_trader,
         risk_mgr=_risk_mgr,
         strategy_config=strategy_config,
         notifier=_notifier if _notifier.enabled else None,
-        dry_run=True,
+        dry_run=True,  # default; overridden by state file if present
         status_interval_secs=status_interval,
         position_manager=_position_mgr,
         position_tracker=_position_tracker,
+        state_file=executor_state_file or None,
     )
+    print(f"[Cadence] Executor mode: "
+          f"{'DRY RUN' if _process_ctrl.dry_run else 'LIVE/PAPER'}")
 
     # 4. Sync initial balance
     if _trader.authenticated:

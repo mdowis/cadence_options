@@ -947,6 +947,13 @@ async function doCloseTracked(tag) {
     alert('Close failed: HTTP ' + r.status + ' ' + r.body);
   } else if (r && !r.ok) {
     alert('Close failed: ' + (r.detail || 'unknown'));
+  } else if (r && r.dry_run) {
+    // Critical: in dry_run mode the close was logged but NOT sent to
+    // Tradier. The position is still open at the broker and will keep
+    // showing in the tracker. Operator needs to enable PAPER first.
+    alert('Close was logged in DRY RUN mode -- no order was sent to ' +
+          'the broker. Toggle to PAPER (sandbox) or LIVE (production) ' +
+          'to actually close the position.');
   }
   doRefresh();
 }

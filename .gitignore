@@ -11,6 +11,7 @@ build/
 # State
 risk_state.json
 position_tracker.json
+executor_state.json
 
 # OS
 .DS_Store

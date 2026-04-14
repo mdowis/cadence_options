@@ -88,17 +88,22 @@ class ProcessController:
     def __init__(self, trader, risk_mgr, strategy_config, notifier=None,
                  scan_interval=60, position_interval=30, dry_run=True,
                  status_interval_secs=3600, position_manager=None,
-                 position_tracker=None):
+                 position_tracker=None, state_file=None):
         self.trader = trader
         self.risk_mgr = risk_mgr
         self.strategy_config = strategy_config
         self.notifier = notifier
         self.scan_interval = scan_interval
         self.position_interval = position_interval
-        self.dry_run = dry_run
         self.status_interval_secs = status_interval_secs
         self.position_manager = position_manager
         self.position_tracker = position_tracker
+        self._state_file = state_file
+        # Restore persisted dry_run if a state file is configured.
+        # Otherwise the bot would silently revert to dry_run=True on
+        # every restart, which is dangerous if the operator was in
+        # PAPER mode and expects close orders to actually execute.
+        self.dry_run = self._load_dry_run(default=dry_run)
 
         self._scanner_status = ProcessStatus()
         self._executor_status = ProcessStatus()
@@ -653,7 +658,37 @@ class ProcessController:
     # -- Helpers for setting dry_run mode ------------------------------------
 
     def set_dry_run(self, value):
-        self.dry_run = value
-        logger.info("Dry run set to %s", value)
+        self.dry_run = bool(value)
+        logger.info("Dry run set to %s", self.dry_run)
+        self._save_dry_run()
+
+    def _load_dry_run(self, default=True):
+        """Read persisted dry_run flag from state file, or default."""
+        if not self._state_file:
+            return default
+        try:
+            import json
+            import os
+            if not os.path.isfile(self._state_file):
+                return default
+            with open(self._state_file, "r") as f:
+                data = json.load(f)
+            v = data.get("dry_run", default)
+            logger.info("Loaded dry_run=%s from %s", v, self._state_file)
+            return bool(v)
+        except Exception as e:
+            logger.warning("Failed to load dry_run state: %s", e)
+            return default
+
+    def _save_dry_run(self):
+        """Persist the current dry_run flag so it survives restarts."""
+        if not self._state_file:
+            return
+        try:
+            import json
+            with open(self._state_file, "w") as f:
+                json.dump({"dry_run": self.dry_run}, f)
+        except Exception as e:
+            logger.warning("Failed to save dry_run state: %s", e)
 
 

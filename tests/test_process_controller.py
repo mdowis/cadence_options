@@ -591,6 +591,63 @@ class TestBrokerSyncThread(unittest.TestCase):
         self.pc.stop_broker_sync()
 
 
+class TestDryRunPersistence(unittest.TestCase):
+    """Regression: dry_run state must survive restart so PAPER/LIVE
+    mode doesn't silently revert and break the Close button."""
+
+    def setUp(self):
+        import tempfile
+        fd, self.state_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(self.state_path)
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=0)
+
+    def tearDown(self):
+        try:
+            os.unlink(self.state_path)
+        except OSError:
+            pass
+
+    def test_set_dry_run_persists_to_file(self):
+        pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, state_file=self.state_path,
+        )
+        pc.set_dry_run(False)
+        # New instance reads persisted value
+        pc2 = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True,  # constructor default
+            state_file=self.state_path,
+        )
+        self.assertFalse(pc2.dry_run, "Should restore PAPER/LIVE from state")
+
+    def test_no_state_file_uses_default(self):
+        pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, state_file=None,
+        )
+        self.assertTrue(pc.dry_run)
+        pc.set_dry_run(False)  # shouldn't raise even without state file
+        # New instance with no state file uses constructor default
+        pc2 = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, state_file=None,
+        )
+        self.assertTrue(pc2.dry_run)
+
+    def test_corrupt_state_file_falls_back_to_default(self):
+        with open(self.state_path, "w") as f:
+            f.write("not json {{")
+        pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, state_file=self.state_path,
+        )
+        # Should not crash; falls back to constructor default
+        self.assertTrue(pc.dry_run)
+
+
 class TestSetDryRun(unittest.TestCase):
 
     def test_toggle(self):

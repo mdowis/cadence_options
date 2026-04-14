@@ -270,7 +270,7 @@ Multiple ICs sharing the same legs are aggregated by Tradier.">
 
     <!-- Always-visible action bar. Reconcile + Test Fetch are top-level
          because operators need them accessible, not buried in an accordion. -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:6px 0;margin-bottom:4px">
       <button class="btn btn-sm btn-blue"
               onclick="doReconcile()"
               title="Rebuild the tracker from Tradier's filled credit multileg order history. Adopts untracked broker positions and drops tracker entries with no matching broker legs.">
@@ -281,6 +281,14 @@ Multiple ICs sharing the same legs are aggregated by Tradier.">
       <span id="reconcile-result" style="font-size:11px;color:var(--dim);align-self:center"></span>
       <span id="test-fetch-result" style="font-size:11px;color:var(--dim);align-self:center"></span>
     </div>
+    <!-- Fixed-location host for reconcile skipped-order details so it's
+         always findable, not buried inside the buttons flex row. -->
+    <div id="reconcile-details" style="display:none;margin:0 0 8px 0;
+         padding:8px 12px;background:rgba(234,179,8,0.08);
+         border:1px solid rgba(234,179,8,0.3);border-radius:4px;
+         font-size:11px;color:var(--text);max-height:300px;
+         overflow:auto"></div>
+    <div style="border-bottom:1px solid var(--border);margin-bottom:8px"></div>
 
     <!-- Diagnostics accordion (collapsed detail view) -->
     <div class="accordion-header" onclick="toggleAccordion('diag-body', this)"
@@ -769,26 +777,18 @@ async function doReconcile() {
   out.style.color = adopted > 0 ? 'var(--green)' :
                     skipped > 0 ? 'var(--yellow)' : 'var(--dim)';
 
-  // Render skipped-order details so operator can see WHY adoption failed
+  // Render skipped-order details into the fixed host element so the
+  // operator can always find it (the placeholder div is in the HTML
+  // right under the buttons row).
   var details = r.skipped_details || [];
   // Filter out 'already tracked' entries -- those are expected/benign
   var realSkips = details.filter(function(d) {
     return d.reason !== 'already tracked';
   });
-  // Find or create a details host beneath the reconcile button
-  var hostId = 'reconcile-details';
-  var host = el(hostId);
-  if (!host) {
-    host = document.createElement('div');
-    host.id = hostId;
-    host.style.cssText = 'margin-top:8px;padding:8px 12px;' +
-      'background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.3);' +
-      'border-radius:4px;font-size:11px;color:var(--text);' +
-      'max-height:300px;overflow:auto';
-    out.parentNode.appendChild(host);
-  }
+  var host = el('reconcile-details');
   if (!realSkips.length) {
     host.style.display = 'none';
+    host.innerHTML = '';
   } else {
     host.style.display = 'block';
     var rows = realSkips.map(function(d, i) {

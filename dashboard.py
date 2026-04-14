@@ -906,17 +906,23 @@ def _reconcile_tracker_with_broker():
       2. Fetch all orders from Tradier.
       3. For each filled credit multileg order:
          - Extract its 4 leg symbols
-         - If all 4 are currently open at the broker AND we don't
-           already track this tag, create a tracker entry.
-      4. Optionally: drop tracker entries whose legs are no longer
-         in broker (orphans).
+         - Try EXACT match against broker positions; fall back to
+           PARSED match by (root, exp, type, strike) -- because
+           Tradier's /orders sometimes returns slightly different
+           symbol formatting than /positions.
+         - If matched and not already tracked, create a tracker entry.
+      4. Drop tracker entries whose legs are no longer in broker.
 
-    Returns a summary dict of what was done.
+    Returns a summary dict of what was done plus per-skipped-order
+    reasons so the operator can debug failed adoptions.
     """
     result = {
         "adopted": [],
         "dropped_orphans": [],
         "skipped_no_match": 0,
+        "skipped_details": [],   # list of {order_id, reason, ...}
+        "orders_examined": 0,
+        "filled_credit_orders": 0,
         "error": None,
     }
     if not _trader or not _trader.authenticated:
@@ -933,11 +939,10 @@ def _reconcile_tracker_with_broker():
         result["error"] = f"broker fetch failed: {e}"
         return result
 
+    result["orders_examined"] = len(orders)
+
     broker_symbols = {p.get("symbol") for p in positions if p.get("symbol")}
     existing_tags = {t.tag for t in _position_tracker.get_open()}
-
-    # Group existing tracker leg-sets by leg symbols so we can skip
-    # orders whose legs already match a tracker entry
     existing_leg_sets = [set(t.leg_symbols())
                          for t in _position_tracker.get_open()]
 
@@ -945,13 +950,24 @@ def _reconcile_tracker_with_broker():
     from cadence.strategy import IronCondorCandidate
     from datetime import datetime
 
+    # Build a fallback lookup: parsed-key -> broker position symbol.
+    # Lets us match orders whose leg symbols look slightly different
+    # but parse to the same (root, exp, type, strike).
+    broker_by_parsed = {}
+    for sym in broker_symbols:
+        parsed = _parse_occ_symbol(sym)
+        if parsed:
+            broker_by_parsed[parsed] = sym
+
     for o in orders:
+        order_id = o.get("id", "?")
         status = (o.get("status") or "").lower()
         if status != "filled":
             continue
         otype = (o.get("type") or "").lower()
         if otype and otype != "credit":
-            continue  # only credit entries
+            continue
+        result["filled_credit_orders"] += 1
 
         order_legs_raw = o.get("leg") or o.get("legs") or []
         if isinstance(order_legs_raw, dict):
@@ -963,16 +979,54 @@ def _reconcile_tracker_with_broker():
                 leg_syms.append(sym)
 
         if len(leg_syms) != 4:
+            result["skipped_details"].append({
+                "order_id": order_id,
+                "reason": f"order has {len(leg_syms)} legs, expected 4",
+                "tag": o.get("tag"),
+            })
             continue
         leg_set = set(leg_syms)
 
-        # Skip if all legs aren't currently at broker
-        if not leg_set.issubset(broker_symbols):
-            result["skipped_no_match"] += 1
-            continue
+        # Pass 1: exact symbol match
+        matches_exact = leg_set.issubset(broker_symbols)
+        matched_symbols = leg_set
+        if not matches_exact:
+            # Pass 2: parsed-key match (handles formatting differences)
+            mapped = []
+            unparsed = []
+            for sym in leg_syms:
+                parsed = _parse_occ_symbol(sym)
+                if parsed and parsed in broker_by_parsed:
+                    mapped.append(broker_by_parsed[parsed])
+                else:
+                    unparsed.append(sym)
+            if len(mapped) == 4:
+                matched_symbols = set(mapped)
+                # Replace leg_syms with the broker's canonical symbols
+                # so downstream parsing works against broker-side data
+                leg_syms = mapped
+                leg_set = matched_symbols
+            else:
+                result["skipped_details"].append({
+                    "order_id": order_id,
+                    "reason": ("legs do not match any current broker "
+                               "positions (exact and parsed-fallback "
+                               "both failed)"),
+                    "order_legs": list(leg_set),
+                    "broker_legs": sorted(broker_symbols),
+                    "unmatched": unparsed,
+                    "tag": o.get("tag"),
+                })
+                result["skipped_no_match"] += 1
+                continue
 
         # Skip if tracker already has these legs
         if any(leg_set == s for s in existing_leg_sets):
+            result["skipped_details"].append({
+                "order_id": order_id,
+                "reason": "already tracked",
+                "tag": o.get("tag"),
+            })
             continue
 
         # Parse the legs to figure out which is short/long put/call

@@ -756,11 +756,72 @@ async function doReconcile() {
     out.style.color = 'var(--red)';
     return;
   }
-  var msg = 'Adopted: ' + (r.adopted ? r.adopted.length : 0) +
-            ', dropped orphans: ' + (r.dropped_orphans ? r.dropped_orphans.length : 0) +
-            ', unmatched orders: ' + (r.skipped_no_match || 0);
-  out.textContent = msg;
-  out.style.color = 'var(--green)';
+  var adopted = (r.adopted || []).length;
+  var dropped = (r.dropped_orphans || []).length;
+  var skipped = r.skipped_no_match || 0;
+  var examined = r.orders_examined || 0;
+  var filled = r.filled_credit_orders || 0;
+  out.innerHTML = 'Adopted: <strong>' + adopted +
+                  '</strong>, dropped orphans: <strong>' + dropped +
+                  '</strong>, unmatched: <strong>' + skipped +
+                  '</strong> (examined ' + examined +
+                  ' orders, ' + filled + ' filled credit)';
+  out.style.color = adopted > 0 ? 'var(--green)' :
+                    skipped > 0 ? 'var(--yellow)' : 'var(--dim)';
+
+  // Render skipped-order details so operator can see WHY adoption failed
+  var details = r.skipped_details || [];
+  // Filter out 'already tracked' entries -- those are expected/benign
+  var realSkips = details.filter(function(d) {
+    return d.reason !== 'already tracked';
+  });
+  // Find or create a details host beneath the reconcile button
+  var hostId = 'reconcile-details';
+  var host = el(hostId);
+  if (!host) {
+    host = document.createElement('div');
+    host.id = hostId;
+    host.style.cssText = 'margin-top:8px;padding:8px 12px;' +
+      'background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.3);' +
+      'border-radius:4px;font-size:11px;color:var(--text);' +
+      'max-height:300px;overflow:auto';
+    out.parentNode.appendChild(host);
+  }
+  if (!realSkips.length) {
+    host.style.display = 'none';
+  } else {
+    host.style.display = 'block';
+    var rows = realSkips.map(function(d, i) {
+      var bits = ['<div style="margin-bottom:6px;padding-bottom:6px;' +
+                  'border-bottom:1px solid var(--border)">' +
+                  '<strong>Skipped order #' + (i + 1) +
+                  ' (id=' + esc(String(d.order_id || '?')) + ')</strong>'];
+      bits.push('<div style="color:var(--yellow)">Reason: ' +
+                esc(d.reason) + '</div>');
+      if (d.tag) {
+        bits.push('<div>Tag: <code>' + esc(d.tag) + '</code></div>');
+      }
+      if (d.order_legs) {
+        bits.push('<div>Order legs (from /orders): <code>' +
+                  d.order_legs.map(esc).join(', ') + '</code></div>');
+      }
+      if (d.unmatched && d.unmatched.length) {
+        bits.push('<div>Could not match: <code>' +
+                  d.unmatched.map(esc).join(', ') + '</code></div>');
+      }
+      if (d.broker_legs) {
+        bits.push('<div>Broker positions (from /positions): <code>' +
+                  d.broker_legs.map(esc).join(', ') + '</code></div>');
+      }
+      bits.push('</div>');
+      return bits.join('');
+    });
+    host.innerHTML = '<div style="font-weight:600;margin-bottom:6px;' +
+      'color:var(--yellow)">Skipped orders (' + realSkips.length +
+      ') -- click X to dismiss <button onclick="this.parentNode.parentNode.style.display=&quot;none&quot;" style="float:right;background:none;border:none;color:var(--dim);cursor:pointer">X</button></div>' +
+      rows.join('');
+  }
+
   setTimeout(doRefresh, 500);
 }
 

@@ -777,20 +777,45 @@ async function doReconcile() {
   out.style.color = adopted > 0 ? 'var(--green)' :
                     skipped > 0 ? 'var(--yellow)' : 'var(--dim)';
 
-  // Render skipped-order details into the fixed host element so the
-  // operator can always find it (the placeholder div is in the HTML
-  // right under the buttons row).
+  // Render skipped-order details. Find the fixed placeholder host
+  // OR create one dynamically (browsers caching old HTML wouldn't
+  // have the placeholder).
   var details = r.skipped_details || [];
-  // Filter out 'already tracked' entries -- those are expected/benign
   var realSkips = details.filter(function(d) {
     return d.reason !== 'already tracked';
   });
   var host = el('reconcile-details');
+  if (!host) {
+    // Cached HTML without the placeholder. Inject one right after
+    // the reconcile button row -- traverse up to find a stable
+    // ancestor and prepend.
+    host = document.createElement('div');
+    host.id = 'reconcile-details';
+    host.style.cssText = 'margin:8px 0;padding:8px 12px;' +
+      'background:rgba(234,179,8,0.10);' +
+      'border:1px solid rgba(234,179,8,0.4);border-radius:4px;' +
+      'font-size:11px;color:var(--text);max-height:300px;overflow:auto';
+    var anchor = el('reconcile-result');
+    if (anchor && anchor.parentNode && anchor.parentNode.parentNode) {
+      anchor.parentNode.parentNode.insertBefore(
+        host, anchor.parentNode.nextSibling);
+    } else {
+      // Last resort: append to body so it's at least visible somewhere
+      document.body.appendChild(host);
+    }
+  }
+  // Always render something, even when nothing was skipped, so the
+  // operator can see the reconcile actually ran and processed orders.
+  host.style.display = 'block';
   if (!realSkips.length) {
-    host.style.display = 'none';
-    host.innerHTML = '';
+    var alreadyTracked = details.length - realSkips.length;
+    host.innerHTML = '<div style="color:var(--green)">' +
+      '<strong>Reconcile complete.</strong> ' +
+      examined + ' orders examined, ' + filled + ' filled credit, ' +
+      adopted + ' newly adopted, ' + alreadyTracked + ' already tracked. ' +
+      'No unmatched orders to report.' +
+      '</div>';
   } else {
-    host.style.display = 'block';
     var rows = realSkips.map(function(d, i) {
       var bits = ['<div style="margin-bottom:6px;padding-bottom:6px;' +
                   'border-bottom:1px solid var(--border)">' +

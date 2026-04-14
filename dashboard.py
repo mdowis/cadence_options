@@ -306,6 +306,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     }
             self._send_json(data)
 
+        elif path == "/api/orders":
+            # Broker orders (pending + filled) so operator can see
+            # close orders that haven't filled yet and are blocking
+            # tracker cleanup.
+            orders = []
+            if _trader and _trader.authenticated:
+                try:
+                    orders = _trader.get_orders()
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+                    return
+            self._send_json({"orders": orders})
+
         elif path == "/api/tracked-positions":
             # Our own view of open iron condors with unrealized P&L.
             # P&L uses MIDPOINT close debit (fair mark) so the
@@ -467,6 +480,38 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if _risk_mgr:
                 _risk_mgr.reset_daily()
             self._send_json({"status": "reset"})
+
+        elif path.startswith("/api/orders/") and path.endswith("/cancel"):
+            # Cancel a pending broker order by order_id. For stuck
+            # close orders that never filled.
+            order_id = path.split("/")[-2]
+            if not _trader or not _trader.authenticated:
+                self._send_json({"error": "broker not authenticated"}, 401)
+                return
+            try:
+                result = _trader.cancel_order(order_id)
+                self._send_json({"ok": True, "result": result})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 500)
+
+        elif (path.startswith("/api/tracked-positions/")
+              and path.endswith("/forget")):
+            # Manually drop a tracker entry without submitting a close
+            # order. Use when the position was closed outside the bot
+            # (Tradier UI, expiration, assignment) or when a stuck
+            # phantom needs to be evicted. Does NOT touch the broker.
+            tag = path.split("/")[-2]
+            if not _position_tracker:
+                self._send_json({"error": "tracker not initialized"}, 500)
+                return
+            tracked = _position_tracker.get_by_tag(tag)
+            if tracked is None:
+                self._send_json({"error": f"no tracked position with tag {tag}"}, 404)
+                return
+            _position_tracker.remove(tag)
+            logger.info("Tracker: forgot tag=%s symbol=%s (manual evict)",
+                        tag, tracked.symbol)
+            self._send_json({"ok": True, "detail": f"forgot {tag}"})
 
         elif (path.startswith("/api/tracked-positions/")
               and path.endswith("/close")):

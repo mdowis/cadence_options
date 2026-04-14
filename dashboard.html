@@ -919,7 +919,10 @@ function renderTracked(tracked) {
       '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
       '<td style="font-size:10px;color:var(--dim);font-family:var(--font)">' + esc(tagShort) + '</td>' +
-      '<td><button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(tag) + '\')">Close</button></td>' +
+      '<td>' +
+        '<button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(tag) + '\')" title="Submit a close order to the broker">Close</button> ' +
+        '<button class="btn btn-sm" onclick="forgetTracked(\'' + esc(tag) + '\')" title="Drop from tracker without touching the broker">Forget</button>' +
+      '</td>' +
       '</tr>';
   }).join('');
   // Add a footer row summarizing the totals
@@ -938,6 +941,26 @@ function closeTracked(tag) {
     '<span class="confirm-text">Close iron condor ' + esc(tag) + ' now?</span>' +
     '<button class="btn btn-sm btn-red" onclick="doCloseTracked(\'' + esc(tag) + '\')">Confirm close</button>' +
     '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+}
+
+function forgetTracked(tag) {
+  if (!tag) return;
+  var area = el('confirm-area');
+  area.innerHTML = '<div class="confirm-inline">' +
+    '<span class="confirm-text">Forget tracker entry ' + esc(tag) +
+    '? This only removes it from the local tracker -- any real ' +
+    'position at the broker is NOT affected.</span>' +
+    '<button class="btn btn-sm btn-red" onclick="doForgetTracked(\'' + esc(tag) + '\')">Forget</button>' +
+    '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
+}
+
+async function doForgetTracked(tag) {
+  cancelConfirm();
+  var r = await api('POST', '/api/tracked-positions/' + encodeURIComponent(tag) + '/forget');
+  if (r && r._error) {
+    alert('Forget failed: HTTP ' + r.status + ' ' + r.body);
+  }
+  doRefresh();
 }
 
 async function doCloseTracked(tag) {

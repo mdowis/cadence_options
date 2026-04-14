@@ -478,9 +478,26 @@ function esc(s) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+// Read the auth token injected by the server (only present when
+// CADENCE_DASHBOARD_TOKEN is configured AND the user supplied it).
+function authToken() {
+  var m = document.querySelector('meta[name="cadence-auth-token"]');
+  return m ? m.getAttribute('content') : '';
+}
+
+function authHeaders(extra) {
+  // Every request includes X-Cadence-Client as CSRF defense. When an
+  // auth token is configured, include X-Cadence-Auth as well.
+  var h = { 'X-Cadence-Client': 'dashboard' };
+  var tok = authToken();
+  if (tok) h['X-Cadence-Auth'] = tok;
+  if (extra) for (var k in extra) h[k] = extra[k];
+  return h;
+}
+
 async function api(method, path) {
   try {
-    var opts = { method: method };
+    var opts = { method: method, headers: authHeaders() };
     var r = await fetch(path, opts);
     if (!r.ok) {
       var txt = '';
@@ -558,8 +575,23 @@ async function toggleExecutor() {
 }
 
 async function doResume() {
-  await api('POST', '/api/risk/kill-switch/deactivate');
-  doRefresh();
+  // Server requires the confirm header to re-enable trading.
+  if (!confirm('Resume trading? Kill switch will be deactivated.')) return;
+  try {
+    var r = await fetch('/api/risk/kill-switch/deactivate', {
+      method: 'POST',
+      headers: authHeaders({'X-Cadence-Confirm-Resume': 'CONFIRM-RESUME'}),
+    });
+    if (!r.ok) {
+      var data = {};
+      try { data = await r.json(); } catch(e){}
+      alert('Resume failed: ' + (data.error || ('HTTP ' + r.status)));
+      return;
+    }
+    doRefresh();
+  } catch (e) {
+    alert('Resume failed: ' + e.message);
+  }
 }
 
 function toggleLiveMode(e) {
@@ -588,11 +620,12 @@ function toggleLiveMode(e) {
 }
 async function setDryRun(value, extraHeaders) {
   var body = 'value=' + (value ? 'true' : 'false');
-  var headers = extraHeaders || {};
   try {
     var r = await fetch('/api/executor/dry-run', {
       method: 'POST',
-      headers: Object.assign({'Content-Type': 'application/x-www-form-urlencoded'}, headers),
+      headers: authHeaders(Object.assign(
+        {'Content-Type': 'application/x-www-form-urlencoded'},
+        extraHeaders || {})),
       body: body,
     });
     var data = await r.json();
@@ -600,7 +633,6 @@ async function setDryRun(value, extraHeaders) {
       alert('Could not change mode: ' + (data.error || ('HTTP ' + r.status)));
       return;
     }
-    // Refresh to pick up the new server state
     doRefresh();
   } catch (e) {
     alert('Mode change failed: ' + e.message);

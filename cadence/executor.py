@@ -77,17 +77,36 @@ def execute_candidate(trader, risk_mgr, candidate, contracts=1,
     tag = f"cadence-{uuid.uuid4().hex[:8]}"
 
     # 1. Pre-trade balance reconciliation (NOT cached)
-    if not dry_run:
-        try:
-            balances = trader.get_account_balances()
-            bal = balances.get("balances", {})
-            total_equity = bal.get("total_equity", 0)
-            cash = bal.get("total_cash", bal.get("cash", {}).get("cash_available", 0))
-            equity_cents = int(float(total_equity) * 100)
-            cash_cents = int(float(cash) * 100)
-            risk_mgr.sync_actual_balance(cash_cents, portfolio_value_cents=equity_cents)
-        except Exception as e:
+    # Run in both dry-run and live modes so the risk check sees the
+    # same equity it would in production. In dry-run, a network blip
+    # or unexpected response shape doesn't abort -- we just log --
+    # since no order is placed anyway. In live, a failed sync IS fatal
+    # (we won't risk-check against stale numbers when real money is
+    # on the line).
+    try:
+        balances = trader.get_account_balances()
+        if not isinstance(balances, dict):
+            raise ValueError("get_account_balances did not return a dict")
+        bal = balances.get("balances", {})
+        if not isinstance(bal, dict):
+            raise ValueError("'balances' key is not a dict")
+        total_equity = bal.get("total_equity")
+        cash_val = bal.get("total_cash")
+        if cash_val is None:
+            cash_obj = bal.get("cash", {}) if isinstance(bal.get("cash"), dict) else {}
+            cash_val = cash_obj.get("cash_available")
+        if total_equity is None:
+            raise ValueError("broker response missing total_equity")
+        equity_cents = int(float(total_equity) * 100)
+        cash_cents = int(float(cash_val or 0) * 100)
+        if equity_cents <= 0:
+            raise ValueError(f"broker equity is non-positive: {equity_cents}")
+        risk_mgr.sync_actual_balance(cash_cents, portfolio_value_cents=equity_cents)
+    except Exception as e:
+        if not dry_run:
             return False, f"Pre-trade balance sync failed: {e}"
+        logger.warning("Pre-trade balance sync failed (dry-run, "
+                       "continuing with existing equity): %s", e)
 
     # 2. Risk check
     decision = risk_mgr.check_trade(candidate, contracts)

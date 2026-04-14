@@ -267,6 +267,15 @@ class ProcessController:
 
         while not self._executor_stop.is_set():
             try:
+                # Don't place orders outside market hours. Tradier would
+                # reject them, but failing fast here avoids noise and
+                # avoids accidentally queuing orders against stale
+                # candidates from an earlier cycle.
+                if not is_market_open():
+                    self._executor_status.last_detail = "Market closed, skipping"
+                    self._executor_stop.wait(60)
+                    continue
+
                 # Check kill switch
                 risk_status = self.risk_mgr.get_status()
                 if risk_status["kill_switch"]["active"]:

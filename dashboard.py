@@ -141,19 +141,66 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-cache, no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # No Access-Control-Allow-Origin: we serve the dashboard
+        # same-origin; cross-origin scripts should NOT read our responses.
         self.end_headers()
         self.wfile.write(body)
 
     def _send_html(self, path):
         try:
             with open(path, "r") as f:
-                body = f.read().encode("utf-8")
+                body = f.read()
+            # Inject a token meta tag so the dashboard JS can include
+            # the bearer token on API calls. Only rendered when the
+            # request arrived with a matching ?token= query param so
+            # the token itself isn't handed out to anyone who fetches
+            # the root page.
+            token_meta = ""
+            configured = _env("CADENCE_DASHBOARD_TOKEN")
+            if configured:
+                parsed = urlparse(self.path)
+                qs = parse_qs(parsed.query)
+                supplied = qs.get("token", [""])[0]
+                if supplied == configured:
+                    token_meta = (
+                        '<meta name="cadence-auth-token" content="{}">'
+                        .format(configured.replace('"', '&quot;'))
+                    )
+                else:
+                    # Token required but not supplied -- render a
+                    # minimal login page instead of the real dashboard.
+                    body = (
+                        "<!DOCTYPE html><meta charset='utf-8'>"
+                        "<title>Cadence Options - Login</title>"
+                        "<body style='font-family:sans-serif;"
+                        "background:#0a0e17;color:#e2e8f0;padding:40px;"
+                        "max-width:400px;margin:auto'>"
+                        "<h1 style='font-size:16px'>Cadence Options</h1>"
+                        "<p>Paste your CADENCE_DASHBOARD_TOKEN:</p>"
+                        "<form>"
+                        "<input type='password' name='token' style='"
+                        "width:100%;padding:8px;background:#111827;"
+                        "border:1px solid #1e2d4a;color:#e2e8f0;"
+                        "font-family:monospace'>"
+                        "<button type='submit' style='margin-top:12px;"
+                        "padding:8px 16px;background:#06b6d4;border:0;"
+                        "color:#000;cursor:pointer'>Continue</button>"
+                        "</form></body>"
+                    )
+                    body_bytes = body.encode("utf-8")
+                    self.send_response(401)
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(body_bytes)
+                    return
+            body = body.replace("</head>", token_meta + "</head>", 1)
+            body_bytes = body.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(body_bytes)
         except FileNotFoundError:
             self._send_json({"error": "dashboard.html not found"}, 404)
 
@@ -163,24 +210,55 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self.rfile.read(length)
         return b""
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+    # NOTE: do_OPTIONS is intentionally absent. We return 501 to CORS
+    # preflights, which blocks cross-origin fetches that use non-simple
+    # request headers (like X-Cadence-Client below). Combined with the
+    # absence of Access-Control-Allow-Origin, this is our CSRF defense:
+    # external sites cannot read our responses or issue state-changing
+    # requests that trip our header check.
+
+    def _check_csrf(self):
+        """Require a custom header on mutating endpoints.
+
+        Browsers cannot add this header to a cross-origin 'simple'
+        request (POSTs with text/plain, form-urlencoded, or multipart)
+        without a CORS preflight. Since we don't respond to preflight,
+        external sites cannot issue POSTs to our mutating endpoints.
+        Same-origin dashboard JS can set it freely.
+        """
+        expected = "dashboard"
+        actual = self.headers.get("X-Cadence-Client", "")
+        return actual == expected
+
+    def _check_auth(self):
+        """If CADENCE_DASHBOARD_TOKEN is configured, require it as a
+        bearer token in X-Cadence-Auth. Empty config = no auth (relies
+        on 127.0.0.1 binding and CSRF header)."""
+        expected = _env("CADENCE_DASHBOARD_TOKEN")
+        if not expected:
+            return True
+        supplied = self.headers.get("X-Cadence-Auth", "")
+        return supplied == expected
 
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
 
+        # Serve the dashboard HTML unauthenticated (it will supply
+        # credentials for subsequent /api calls). Everything else
+        # requires auth when a token is configured.
         if path == "/":
             html_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "dashboard.html"
             )
             self._send_html(html_path)
+            return
 
-        elif path == "/api/scan":
+        if not self._check_auth():
+            self._send_json({"error": "unauthorized"}, 401)
+            return
+
+        if path == "/api/scan":
             status = _process_ctrl.get_status() if _process_ctrl else {}
             self._send_json({
                 "candidates": status.get("candidates", []),
@@ -255,6 +333,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        # Every mutating endpoint requires the CSRF header. This blocks
+        # cross-origin state changes -- a malicious page cannot set a
+        # custom header on a simple POST without CORS preflight, and
+        # we don't respond to preflight, so the POST never happens.
+        if not self._check_csrf():
+            self._send_json({"error": "CSRF check failed: missing "
+                                      "X-Cadence-Client header"}, 403)
+            return
+        if not self._check_auth():
+            self._send_json({"error": "unauthorized"}, 401)
+            return
+
         if path == "/api/scanner/start":
             if _process_ctrl:
                 _process_ctrl.start_scanner()
@@ -311,6 +401,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "activated"})
 
         elif path == "/api/risk/kill-switch/deactivate":
+            # Require explicit confirmation header so an attacker or
+            # fat-finger cannot silently re-enable trading after a
+            # kill. The dashboard's Resume button sends this header.
+            confirm = self.headers.get("X-Cadence-Confirm-Resume", "")
+            if confirm != "CONFIRM-RESUME":
+                self._send_json({
+                    "error": "resume requires X-Cadence-Confirm-Resume: "
+                             "CONFIRM-RESUME header"
+                }, 403)
+                return
             if _risk_mgr:
                 _risk_mgr.deactivate_kill_switch()
             self._send_json({"status": "deactivated"})
@@ -460,6 +560,17 @@ def _cmd_exec_stop(*args):
 
 
 def _cmd_exec_live(*args):
+    # This command is registered with notifier.register_confirmation,
+    # which re-dispatches the handler with "__confirmed__" appended to
+    # args after the user replies CONFIRM. On the FIRST invocation we
+    # must NOT enable live trading -- we just return the prompt string,
+    # which the notifier sends back to the user. The dangerous action
+    # happens only on the confirmed second call.
+    if "__confirmed__" not in args:
+        env = _env("TRADIER_ENV", "sandbox")
+        env_warning = " (PRODUCTION -- real money)" if env == "production" else " (sandbox paper)"
+        return ("Enable live trading" + env_warning + "? Reply CONFIRM "
+                "within 30s to proceed.")
     if _process_ctrl:
         _process_ctrl.set_dry_run(False)
     return "LIVE TRADING ENABLED. Executor will place real orders."
@@ -587,9 +698,21 @@ def main():
         print("[Cadence] Scanner auto-started")
 
     # 7. Start HTTP server
+    # Default to 127.0.0.1 so the dashboard is not exposed to the LAN.
+    # Set CADENCE_BIND_ADDR=0.0.0.0 only if you intentionally want
+    # other devices to reach it -- and only after setting a strong
+    # CADENCE_DASHBOARD_TOKEN.
     port = _env_int("CADENCE_PORT", 8050)
-    server = HTTPServer(("0.0.0.0", port), DashboardHandler)
-    print(f"[Cadence] Dashboard: http://localhost:{port}")
+    bind_addr = _env("CADENCE_BIND_ADDR", "127.0.0.1")
+    dash_token = _env("CADENCE_DASHBOARD_TOKEN")
+    if bind_addr != "127.0.0.1" and not dash_token:
+        print("[Cadence] WARNING: bound to a non-loopback address "
+              f"({bind_addr}) without CADENCE_DASHBOARD_TOKEN set. "
+              "Anyone on the network can control the bot.")
+    server = HTTPServer((bind_addr, port), DashboardHandler)
+    print(f"[Cadence] Dashboard: http://{bind_addr}:{port}")
+    if dash_token:
+        print("[Cadence] Auth token: required (CADENCE_DASHBOARD_TOKEN)")
     print("[Cadence] Press Ctrl+C to stop")
 
     try:

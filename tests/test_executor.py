@@ -124,15 +124,47 @@ class TestExecuteCandidate(unittest.TestCase):
         self.candidate = FakeCandidate()
 
     def test_dry_run_success(self):
+        # Dry-run pre-syncs balance for paper/live equivalence, so the
+        # mock must return a usable shape.
+        self.trader.get_account_balances.return_value = {
+            "balances": {"total_equity": 10000.00, "total_cash": 8000.00}
+        }
         ok, detail = execute_candidate(
             self.trader, self.risk_mgr, self.candidate, dry_run=True
         )
         self.assertTrue(ok)
         self.assertIn("[DRY RUN]", detail)
-        # Should NOT call trader.place_multileg_order in dry run
+        # Still must NOT call place_multileg_order in dry run
         self.trader.place_multileg_order.assert_not_called()
-        # Should NOT call get_account_balances in dry run
-        self.trader.get_account_balances.assert_not_called()
+        # DOES call get_account_balances (pre-trade sync even in dry-run)
+        self.trader.get_account_balances.assert_called_once()
+
+    def test_dry_run_continues_on_sync_failure(self):
+        """A bad broker response in dry-run logs a warning but still runs."""
+        self.trader.get_account_balances.side_effect = RuntimeError("api down")
+        ok, detail = execute_candidate(
+            self.trader, self.risk_mgr, self.candidate, dry_run=True
+        )
+        self.assertTrue(ok)
+        self.assertIn("[DRY RUN]", detail)
+
+    def test_live_aborts_on_sync_failure(self):
+        """A bad broker response in live mode aborts the trade."""
+        self.trader.get_account_balances.side_effect = RuntimeError("api down")
+        ok, detail = execute_candidate(
+            self.trader, self.risk_mgr, self.candidate, dry_run=False
+        )
+        self.assertFalse(ok)
+        self.assertIn("sync failed", detail.lower())
+        self.trader.place_multileg_order.assert_not_called()
+
+    def test_sync_rejects_malformed_balance_response(self):
+        """Non-dict response should not corrupt equity state."""
+        self.trader.get_account_balances.return_value = "not a dict"
+        ok, detail = execute_candidate(
+            self.trader, self.risk_mgr, self.candidate, dry_run=False
+        )
+        self.assertFalse(ok)
 
     def test_live_success(self):
         self.trader.get_account_balances.return_value = {

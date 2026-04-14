@@ -500,6 +500,7 @@ class RiskManager:
                 },
                 "drawdown_reference_mode": self.config.drawdown_reference,
                 "risk_events": list(self._state.risk_events[-10:]),
+                "trade_history": list(self._state.trade_history[-50:]),
                 "kelly": self._kelly_snapshot(),
             }
 

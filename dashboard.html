@@ -345,14 +345,38 @@ that share legs at the broker.">Open Iron Condors (tracker)</div>
           <th>Qty</th>
           <th title="Credit at entry, at midpoint. Pre-upgrade entries
 show the conservative (bid-side) value -- flagged with *.">Entry</th>
-          <th title="Current cost to close, at midpoint. This is what
-you'd pay to buy back the position at fair value right now.">Current</th>
+          <th title="Current cost to BUY BACK the iron condor at midpoint.
+LOWER than Entry = profit (cost to close dropped below what you received).
+HIGHER than Entry = loss.">Current</th>
           <th title="(Entry - Current) x contracts x 100">P&amp;L</th>
           <th>P&amp;L%</th><th>Tag</th><th></th>
         </tr>
       </thead>
       <tbody id="tracked-body">
         <tr><td colspan="12" class="empty-row">No open iron condors</td></tr>
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4">
+      <strong style="color:var(--text)">Iron condor P&amp;L direction:</strong>
+      Entry is what you received (positive). Current is what it would
+      cost to buy back (positive). When Current is BELOW Entry,
+      you've made money; when Current is ABOVE Entry, you're losing.
+    </div>
+  </div>
+
+  <!-- Recent Trades (closed) -->
+  <div class="panel">
+    <div class="panel-title" title="Trades that have CLOSED, with realized P&amp;L. UNRESOLVED entries are closes the bot detected but couldn't compute a P&amp;L for (manual close in Tradier UI, expiration, etc.).">Recent Trades (closed)</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>P&amp;L</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody id="trades-body">
+        <tr><td colspan="3" class="empty-row">No closed trades yet</td></tr>
       </tbody>
     </table>
   </div>
@@ -946,7 +970,24 @@ function renderTracked(tracked) {
                    dte != null && dte <= 21 ? 'var(--yellow)' : 'var(--text)';
     var pnlStr = pnl == null ? '--' : '$' + pnl.toFixed(2);
     var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
-    var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
+    // Color the Current cell relative to Entry: lower than entry
+    // (cost to close dropped) = green/winning; higher = red/losing.
+    // Makes the iron-condor-direction obvious without reading the P&L.
+    var currentColor = 'var(--text)';
+    var arrow = '';
+    var entryForCmp = p.entry_credit_mid != null ? p.entry_credit_mid : p.entry_credit;
+    if (p.current_debit != null && entryForCmp != null) {
+      if (p.current_debit < entryForCmp) {
+        currentColor = 'var(--green)';
+        arrow = ' \u25BC';  // down arrow = good for IC seller
+      } else if (p.current_debit > entryForCmp) {
+        currentColor = 'var(--red)';
+        arrow = ' \u25B2';  // up arrow = bad for IC seller
+      }
+    }
+    var currentStr = p.current_debit == null
+        ? '--'
+        : '$' + p.current_debit.toFixed(2) + arrow;
     // Show entry credit. Source indicator:
     //   (no mark) = actual fill price from Tradier (ground truth)
     //   mid       = midpoint computed at strategy time (good approx)
@@ -974,7 +1015,7 @@ function renderTracked(tracked) {
       '<td>' + (p.short_call_strike || '--') + '/' + (p.long_call_strike || '--') + '</td>' +
       '<td>' + (p.contracts || 1) + '</td>' +
       '<td title="' + esc(entryTitle) + '">' + entryStr + '</td>' +
-      '<td>' + currentStr + '</td>' +
+      '<td style="color:' + currentColor + '">' + currentStr + '</td>' +
       '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
       '<td style="font-size:10px;color:var(--dim);font-family:var(--font)">' + esc(tagShort) + '</td>' +
@@ -1038,6 +1079,33 @@ async function doCloseTracked(tag) {
           'to actually close the position.');
   }
   doRefresh();
+}
+
+// ---- Recent closed trades ----
+function renderTrades(trades) {
+  var tbody = el('trades-body');
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-row">No closed trades yet</td></tr>';
+    return;
+  }
+  // Newest first
+  var rows = trades.slice().reverse().slice(0, 50);
+  tbody.innerHTML = rows.map(function(t) {
+    var pnl = t.pnl_cents || 0;
+    var pnlColor = pnl > 0 ? 'var(--green)' :
+                   pnl < 0 ? 'var(--red)' : 'var(--dim)';
+    var time = t.time ? new Date(t.time * 1000).toLocaleString() : '--';
+    var detail = t.detail || '';
+    var isUnresolved = detail.indexOf('UNRESOLVED') === 0;
+    var detailColor = isUnresolved ? 'var(--yellow)' : 'var(--dim)';
+    return '<tr>' +
+      '<td style="font-size:11px">' + esc(time) + '</td>' +
+      '<td style="color:' + pnlColor + ';font-weight:600">' +
+        fmt$(pnl) + '</td>' +
+      '<td style="font-size:11px;color:' + detailColor + '">' +
+        esc(detail) + '</td>' +
+      '</tr>';
+  }).join('');
 }
 
 // ---- Risk events ----
@@ -1230,6 +1298,7 @@ async function doRefresh() {
     // The risk endpoint returns risk_events if state tracks them
     // For now, pull from trade_history or state
     renderRiskEvents(risk.risk_events || []);
+    renderTrades(risk.trade_history || []);
   }
 
   // ---- Processes ----

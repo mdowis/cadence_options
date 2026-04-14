@@ -909,22 +909,23 @@ function renderTracked(tracked) {
     var pnlStr = pnl == null ? '--' : '$' + pnl.toFixed(2);
     var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
     var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
-    // Show entry_credit_mid so Entry - Current = P&L visually (both
-    // are midpoint-based). For pre-upgrade entries the server
-    // estimates a midpoint from the current chain spread -- flag
-    // those with ~ since it's an approximation.
+    // Show entry credit. Source indicator:
+    //   (no mark) = actual fill price from Tradier (ground truth)
+    //   mid       = midpoint computed at strategy time (good approx)
+    //   ~         = estimated from current chain spread (legacy rows)
     var entryShown = p.entry_credit_mid != null
         ? p.entry_credit_mid : p.entry_credit;
-    var estimated = p.entry_is_estimated;
-    var entryMark = estimated ? '~' : '';
+    var source = p.entry_source || 'mid';
+    var entryMark = source === 'legacy' ? '~' : '';
     var entryStr = entryShown != null
         ? (entryMark + '$' + entryShown.toFixed(2)) : '--';
-    var entryTitle = estimated
-        ? 'Estimated midpoint entry (~). This row predates midpoint '
-          + 'tracking; the server estimates the original midpoint '
-          + 'from the current chain spread. Close + reopen the '
-          + 'position for an exact midpoint.'
-        : 'Midpoint entry credit';
+    var entryTitle = {
+        'actual': 'Actual fill price from Tradier order history',
+        'mid': 'Midpoint entry credit computed at strategy time',
+        'legacy': 'Estimated midpoint (~): this row predates midpoint '
+                  + 'tracking. Server estimates from current chain '
+                  + 'spread. Close + reopen for an exact value.',
+    }[source] || 'Entry credit';
     var tag = p.tag || '';
     var tagShort = tag.length > 14 ? tag.substring(0, 14) + '..' : tag;
     return '<tr title="tag=' + esc(tag) + '">' +

@@ -329,21 +329,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 compute_close_debit_mid, _legs_from_chain, _safe_float)
             tracked_info = []
             if _position_tracker and _trader and _trader.authenticated:
+                # Prefer actual fill price from Tradier's order history
+                # over our pre-fill midpoint estimate.
                 for t in _position_tracker.get_open():
                     debit = None
                     pnl_dollars = None
                     pnl_pct = None
-                    entry_for_pnl = getattr(t, "entry_credit_mid",
-                                            t.entry_credit)
-                    # Legacy entries (recorded before we captured
-                    # credit_mid) have entry_credit_mid == entry_credit.
-                    # We ESTIMATE the real midpoint entry by adding
-                    # half the current chain's per-leg bid-ask spread
-                    # back to the conservative stored value. Not
-                    # perfect -- spreads at entry may differ from
-                    # spreads now -- but removes the chronic phantom
-                    # loss bias for old entries.
-                    is_legacy = abs(entry_for_pnl - t.entry_credit) < 0.001
+
+                    # 1. Try the actual fill price from Tradier orders
+                    actual_fill = None
+                    try:
+                        actual_fill = _position_tracker.get_entry_fill_price(
+                            t, _trader)
+                    except Exception:
+                        actual_fill = None
+
+                    # 2. Fall back to our stored midpoint, else the
+                    # conservative entry credit.
+                    if actual_fill is not None and actual_fill > 0:
+                        entry_for_pnl = actual_fill
+                        entry_source = "actual"
+                    else:
+                        entry_for_pnl = getattr(t, "entry_credit_mid",
+                                                 t.entry_credit)
+                        entry_source = ("mid" if entry_for_pnl != t.entry_credit
+                                        else "legacy")
+                    is_legacy = (entry_source == "legacy")
                     try:
                         sp, lp, sc, lc, _by_sym = _legs_from_chain(_trader, t)
                     except Exception:
@@ -378,6 +389,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "entry_credit": t.entry_credit,
                         "entry_credit_mid": entry_for_pnl,
                         "entry_is_estimated": is_legacy,
+                        "entry_source": entry_source,
                         "current_debit": debit,  # midpoint
                         "pnl_dollars": pnl_dollars,
                         "pnl_pct": pnl_pct,

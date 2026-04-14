@@ -221,6 +221,41 @@ class PositionTracker:
                 return True
         return False
 
+    def get_entry_fill_price(self, tracked, trader):
+        """Return the actual avg_fill_price of the entry order from
+        Tradier, or None if not yet filled or not found.
+
+        Ground-truth entry credit -- what Tradier actually gave us,
+        not our pre-fill midpoint estimate. Use this for unrealized
+        P&L display whenever available.
+        """
+        try:
+            orders = trader.get_orders()
+        except Exception as e:
+            logger.warning("get_entry_fill_price: get_orders failed: %s", e)
+            return None
+
+        # Entry order = credit order (type='credit') that filled.
+        # Debit orders with the same tag are close orders -- skip.
+        # We only ever submit one credit order per tag, so we can
+        # return the first match.
+        for o in orders:
+            if o.get("tag") != tracked.tag:
+                continue
+            status = (o.get("status") or "").lower()
+            if status != "filled":
+                continue
+            order_type = (o.get("type") or "").lower()
+            if order_type == "debit":
+                continue
+            try:
+                val = float(o.get("avg_fill_price") or o.get("price") or 0)
+                if val > 0:
+                    return val
+            except (TypeError, ValueError):
+                continue
+        return None
+
     # -- P&L computation ---------------------------------------------------
 
     def compute_realized_pnl_cents(self, tracked, trader):

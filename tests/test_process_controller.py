@@ -230,6 +230,109 @@ class TestBrokerSync(unittest.TestCase):
         self.assertEqual(status["equity"]["current"], 1000000)
 
 
+class TestAutoExitLoop(unittest.TestCase):
+    """Verify _check_and_submit_exits wires position_manager into the sync."""
+
+    def setUp(self):
+        from cadence.position_manager import PositionManager
+        from cadence.position_tracker import PositionTracker
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=1000000)
+        self.position_mgr = PositionManager(
+            profit_target_pct=50, time_stop_dte=21, loss_stop_multiplier=2.0)
+        self.tracker = PositionTracker(state_file=None)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, scan_interval=0.1,
+            position_manager=self.position_mgr,
+            position_tracker=self.tracker,
+        )
+
+    def _record_entry(self, entry_credit=2.40):
+        from cadence.strategy import IronCondorCandidate
+        c = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=entry_credit, max_loss=10 - entry_credit,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+        self.tracker.record_entry(c, tag="t1", contracts=1)
+
+    def _chain_option(self, sym, bid, ask):
+        return {"symbol": sym, "bid": bid, "ask": ask}
+
+    def test_profit_target_triggers_close(self):
+        """Entry credit 2.40, current close debit 1.00 -> 58% profit.
+        PositionManager threshold is 50%, so exit fires."""
+        self._record_entry(entry_credit=2.40)
+        self.trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.45, 0.55),
+            self._chain_option("SPY260530P00425000", 0.10, 0.20),
+            self._chain_option("SPY260530C00465000", 0.40, 0.50),
+            self._chain_option("SPY260530C00475000", 0.05, 0.15),
+        ]
+        # close debit = 0.55 + 0.50 - 0.10 - 0.05 = 0.90
+        # pnl_pct = (2.40 - 0.90) / 2.40 * 100 = 62.5% -> triggers
+
+        self.pc._check_and_submit_exits()
+
+        # Dry-run: execute_close logs but doesn't place an order
+        self.trader.place_multileg_order.assert_not_called()
+        # But dedup should now have the tag so we don't retry immediately
+        with self.pc._exit_attempts_lock:
+            self.assertIn("t1", self.pc._recent_exit_attempts)
+
+    def test_no_exit_when_still_open(self):
+        """Entry 2.40, current debit 1.80 -> 25% profit, below 50% target.
+        No exit should fire."""
+        self._record_entry(entry_credit=2.40)
+        self.trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.85, 0.95),
+            self._chain_option("SPY260530P00425000", 0.10, 0.20),
+            self._chain_option("SPY260530C00465000", 0.80, 0.90),
+            self._chain_option("SPY260530C00475000", 0.05, 0.15),
+        ]
+        # close debit = 0.95 + 0.90 - 0.10 - 0.05 = 1.70 -> 29% profit
+        self.pc._check_and_submit_exits()
+        with self.pc._exit_attempts_lock:
+            self.assertNotIn("t1", self.pc._recent_exit_attempts)
+
+    def test_exit_dedup_prevents_repeat_submissions(self):
+        """Once a close is submitted for a tag, we shouldn't submit
+        again within ATTEMPT_TTL_SECS."""
+        self._record_entry(entry_credit=2.40)
+        self.trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.45, 0.55),
+            self._chain_option("SPY260530P00425000", 0.10, 0.20),
+            self._chain_option("SPY260530C00465000", 0.40, 0.50),
+            self._chain_option("SPY260530C00475000", 0.05, 0.15),
+        ]
+        # First call: triggers exit, records dedup
+        self.pc._check_and_submit_exits()
+        first_call_count = self.trader.get_option_chain.call_count
+
+        # Second call: dedup should prevent re-submitting but we still
+        # fetch the chain to price the position (shared code path)
+        self.pc._check_and_submit_exits()
+
+        # We should not have called place_multileg_order (dry_run)
+        self.trader.place_multileg_order.assert_not_called()
+        # dedup still contains the tag
+        with self.pc._exit_attempts_lock:
+            self.assertIn("t1", self.pc._recent_exit_attempts)
+
+    def test_chain_failure_skips_gracefully(self):
+        self._record_entry(entry_credit=2.40)
+        self.trader.get_option_chain.side_effect = RuntimeError("api down")
+        # Should not raise
+        self.pc._check_and_submit_exits()
+
+
 class TestSetDryRun(unittest.TestCase):
 
     def test_toggle(self):

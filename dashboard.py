@@ -30,6 +30,7 @@ _risk_mgr = None
 _process_ctrl = None
 _notifier = None
 _position_mgr = None
+_position_tracker = None
 _env_path = None
 _script_dir = None
 
@@ -305,6 +306,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     }
             self._send_json(data)
 
+        elif path == "/api/tracked-positions":
+            # Our own view of open iron condors with unrealized P&L.
+            # More useful than Tradier's per-leg /api/positions view.
+            from cadence.executor import compute_close_debit
+            tracked_info = []
+            if _position_tracker and _trader and _trader.authenticated:
+                for t in _position_tracker.get_open():
+                    debit = None
+                    pnl_dollars = None
+                    pnl_pct = None
+                    try:
+                        debit, _ = compute_close_debit(_trader, t)
+                    except Exception:
+                        debit = None
+                    if debit is not None and t.entry_credit > 0:
+                        pnl_dollars = (t.entry_credit - debit) * 100 * t.contracts
+                        pnl_pct = ((t.entry_credit - debit)
+                                   / t.entry_credit) * 100
+                    tracked_info.append({
+                        "tag": t.tag,
+                        "symbol": t.symbol,
+                        "expiration": t.expiration,
+                        "dte": t.current_dte(),
+                        "contracts": t.contracts,
+                        "entry_credit": t.entry_credit,
+                        "current_debit": debit,
+                        "pnl_dollars": pnl_dollars,
+                        "pnl_pct": pnl_pct,
+                        "short_put_strike": t.short_put_strike,
+                        "long_put_strike": t.long_put_strike,
+                        "short_call_strike": t.short_call_strike,
+                        "long_call_strike": t.long_call_strike,
+                        "entry_time": t.entry_time,
+                    })
+            self._send_json({"tracked": tracked_info})
+
         elif path == "/api/diagnostics":
             tradier_env = _env("TRADIER_ENV", "sandbox")
             token, acct, cred_source = _resolve_tradier_creds(tradier_env)
@@ -420,9 +457,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 _risk_mgr.reset_daily()
             self._send_json({"status": "reset"})
 
-        elif path.startswith("/api/positions/") and path.endswith("/close"):
-            pos_id = path.split("/")[-2]
-            self._send_json({"status": "close requested", "position_id": pos_id})
+        elif (path.startswith("/api/tracked-positions/")
+              and path.endswith("/close")):
+            # Manually close a tracked iron condor by tag. Submits a
+            # debit order priced at the current market close-debit;
+            # if the market moves away the order won't fill and the
+            # auto-exit loop (if conditions hold) will retry next cycle.
+            tag = path.split("/")[-2]
+            if not _position_tracker:
+                self._send_json({"error": "tracker not initialized"}, 500)
+                return
+            if not _trader or not _trader.authenticated:
+                self._send_json({"error": "broker not authenticated"}, 401)
+                return
+            tracked = _position_tracker.get_by_tag(tag)
+            if tracked is None:
+                self._send_json({"error": f"no tracked position with tag {tag}"}, 404)
+                return
+            from cadence.executor import compute_close_debit, execute_close
+            debit, _ = compute_close_debit(_trader, tracked)
+            if debit is None:
+                self._send_json({"error": "could not price close"}, 500)
+                return
+            dry = _process_ctrl.dry_run if _process_ctrl else True
+            ok, detail = execute_close(
+                _trader, tracked, limit_debit=debit,
+                dry_run=dry, reason="manual",
+            )
+            self._send_json({"ok": ok, "detail": detail,
+                             "close_debit": debit, "dry_run": dry})
 
         elif path == "/api/test-fetch":
             if _trader and _trader.authenticated:
@@ -580,7 +643,7 @@ def _cmd_exec_live(*args):
 
 def main():
     global _trader, _risk_mgr, _process_ctrl, _notifier, _position_mgr
-    global _env_path, _script_dir
+    global _position_tracker, _env_path, _script_dir
 
     _script_dir = os.path.dirname(os.path.abspath(__file__))
 

@@ -315,18 +315,20 @@ tr:hover td { background: rgba(59,130,246,0.03); }
     </div>
   </div>
 
-  <!-- Open Positions -->
+  <!-- Open Iron Condors (tracker view, one row per IC) -->
   <div class="panel">
-    <div class="panel-title">Open Positions</div>
+    <div class="panel-title">Open Iron Condors</div>
     <table>
       <thead>
         <tr>
-          <th>Ticker</th><th>Exp</th><th>Short P</th><th>Short C</th>
-          <th>Credit</th><th>Current</th><th>P&amp;L</th><th>DTE</th><th></th>
+          <th>Ticker</th><th>Exp</th><th>DTE</th>
+          <th>Put Spread</th><th>Call Spread</th>
+          <th>Credit</th><th>Current</th><th>P&amp;L</th>
+          <th>P&amp;L%</th><th></th>
         </tr>
       </thead>
-      <tbody id="positions-body">
-        <tr><td colspan="9" class="empty-row">No open positions</td></tr>
+      <tbody id="tracked-body">
+        <tr><td colspan="10" class="empty-row">No open iron condors</td></tr>
       </tbody>
     </table>
   </div>
@@ -877,44 +879,55 @@ function toggleCandidate(i) {
   if (window._lastCandidates) renderCandidates(window._lastCandidates);
 }
 
-// ---- Positions ----
-function renderPositions(positions) {
-  var tbody = el('positions-body');
-  if (!positions || positions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">No open positions</td></tr>';
+// ---- Tracked iron condors (one row per IC with P&L) ----
+function renderTracked(tracked) {
+  var tbody = el('tracked-body');
+  if (!tracked || tracked.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No open iron condors</td></tr>';
     return;
   }
-  tbody.innerHTML = positions.map(function(p) {
-    var pnl = p.pnl_cents || 0;
-    var pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  tbody.innerHTML = tracked.map(function(p) {
+    var pnl = p.pnl_dollars;
+    var pnlPct = p.pnl_pct;
+    var pnlColor = pnl == null ? 'var(--dim)' : pnl >= 0 ? 'var(--green)' : 'var(--red)';
     var dte = p.dte;
-    var dteColor = dte != null && dte <= 7 ? 'var(--red)' : dte != null && dte <= 21 ? 'var(--yellow)' : 'var(--text)';
+    var dteColor = dte != null && dte <= 7 ? 'var(--red)' :
+                   dte != null && dte <= 21 ? 'var(--yellow)' : 'var(--text)';
+    var pnlStr = pnl == null ? '--' : '$' + pnl.toFixed(2);
+    var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
+    var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
     return '<tr>' +
       '<td>' + esc(p.symbol || '--') + '</td>' +
       '<td>' + esc(p.expiration || '--') + '</td>' +
-      '<td>' + (p.short_put_strike || '--') + '</td>' +
-      '<td>' + (p.short_call_strike || '--') + '</td>' +
-      '<td>' + fmt$(p.entry_credit_cents) + '</td>' +
-      '<td>' + fmt$(p.current_debit_cents) + '</td>' +
-      '<td style="color:' + pnlColor + ';font-weight:600">' + fmt$(pnl) + '</td>' +
       '<td style="color:' + dteColor + '">' + (dte != null ? dte : '--') + '</td>' +
-      '<td><button class="btn btn-sm btn-red" onclick="closePosition(\'' + esc(p.position_id || '') + '\')">Close</button></td>' +
+      '<td>' + (p.long_put_strike || '--') + '/' + (p.short_put_strike || '--') + '</td>' +
+      '<td>' + (p.short_call_strike || '--') + '/' + (p.long_call_strike || '--') + '</td>' +
+      '<td>$' + (p.entry_credit != null ? p.entry_credit.toFixed(2) : '--') + '</td>' +
+      '<td>' + currentStr + '</td>' +
+      '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
+      '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
+      '<td><button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(p.tag || '') + '\')">Close</button></td>' +
       '</tr>';
   }).join('');
 }
 
-async function closePosition(id) {
-  if (!id) return;
-  S.confirmPending = null;
+function closeTracked(tag) {
+  if (!tag) return;
   var area = el('confirm-area');
-  area.innerHTML = '<div class="confirm-inline"><span class="confirm-text">Close position ' + esc(id) + '?</span>' +
-    '<button class="btn btn-sm btn-red" onclick="doClosePosition(\'' + esc(id) + '\')">Confirm</button>' +
+  area.innerHTML = '<div class="confirm-inline">' +
+    '<span class="confirm-text">Close iron condor ' + esc(tag) + ' now?</span>' +
+    '<button class="btn btn-sm btn-red" onclick="doCloseTracked(\'' + esc(tag) + '\')">Confirm close</button>' +
     '<button class="btn btn-sm" onclick="cancelConfirm()">Cancel</button></div>';
 }
 
-async function doClosePosition(id) {
+async function doCloseTracked(tag) {
   cancelConfirm();
-  await api('POST', '/api/positions/' + encodeURIComponent(id) + '/close');
+  var r = await api('POST', '/api/tracked-positions/' + encodeURIComponent(tag) + '/close');
+  if (r && r._error) {
+    alert('Close failed: HTTP ' + r.status + ' ' + r.body);
+  } else if (r && !r.ok) {
+    alert('Close failed: ' + (r.detail || 'unknown'));
+  }
   doRefresh();
 }
 
@@ -987,14 +1000,14 @@ async function doRefresh() {
     api('GET', '/api/risk'),
     api('GET', '/api/processes'),
     api('GET', '/api/diagnostics'),
-    api('GET', '/api/positions'),
+    api('GET', '/api/tracked-positions'),
     api('GET', '/api/iv_rank'),
   ]);
 
   var risk = results[0];
   var procs = results[1];
   var diag = results[2];
-  var positions = results[3];
+  var tracked = results[3];
   var ivRank = results[4];
 
   // ---- Risk data ----
@@ -1183,9 +1196,9 @@ async function doRefresh() {
     }
   }
 
-  // ---- Positions ----
-  if (positions && !positions._error) {
-    renderPositions(positions.positions || []);
+  // ---- Tracked iron condors ----
+  if (tracked && !tracked._error) {
+    renderTracked(tracked.tracked || []);
   }
 
   // ---- IV Rank ----

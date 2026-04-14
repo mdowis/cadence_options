@@ -34,6 +34,104 @@ def build_close_legs(position, contracts=1):
     ]
 
 
+def build_close_legs_from_tracked(tracked):
+    """Build close legs from a TrackedPosition."""
+    return [
+        (tracked.short_put_symbol, "buy_to_close", tracked.contracts),
+        (tracked.long_put_symbol, "sell_to_close", tracked.contracts),
+        (tracked.short_call_symbol, "buy_to_close", tracked.contracts),
+        (tracked.long_call_symbol, "sell_to_close", tracked.contracts),
+    ]
+
+
+def _safe_float(v):
+    if v is None:
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def compute_close_debit(trader, tracked):
+    """Fetch the option chain for a tracked position's expiration and
+    compute the per-share debit required to close.
+
+    To close an iron condor we:
+      - buy back the two shorts (pay ask)
+      - sell the two longs (receive bid)
+
+    Returns (debit, chain_by_symbol) or (None, None) on failure.
+    """
+    try:
+        chain = trader.get_option_chain(
+            tracked.symbol, tracked.expiration, greeks=False)
+    except Exception as e:
+        logger.warning("Close-debit chain fetch for %s %s failed: %s",
+                       tracked.symbol, tracked.expiration, e)
+        return None, None
+
+    by_sym = {}
+    for o in chain:
+        sym = o.get("symbol")
+        if sym:
+            by_sym[sym] = o
+
+    sp = by_sym.get(tracked.short_put_symbol, {})
+    lp = by_sym.get(tracked.long_put_symbol, {})
+    sc = by_sym.get(tracked.short_call_symbol, {})
+    lc = by_sym.get(tracked.long_call_symbol, {})
+
+    debit = (_safe_float(sp.get("ask"))
+             + _safe_float(sc.get("ask"))
+             - _safe_float(lp.get("bid"))
+             - _safe_float(lc.get("bid")))
+    # Guard against malformed chain: all zeros means we couldn't price
+    # this position -- better to return None than submit a $0 debit.
+    if debit <= 0 and all(o == {} for o in (sp, lp, sc, lc)):
+        return None, by_sym
+    return debit, by_sym
+
+
+def execute_close(trader, tracked, limit_debit, dry_run=True, reason=""):
+    """Submit a closing debit order for a tracked iron condor position.
+
+    limit_debit is per-share. The order is submitted at that price as
+    a day limit; if the market moves away it won't fill and we'll
+    retry on the next cycle.
+    """
+    legs = build_close_legs_from_tracked(tracked)
+    _validate_leg_count(legs)
+
+    summary = (f"CLOSE {tracked.symbol} IC tag={tracked.tag} "
+               f"@ ${limit_debit:.2f}debit ({reason})")
+
+    if dry_run:
+        detail = f"[DRY RUN] {summary}"
+        logger.info(detail)
+        return True, detail
+
+    try:
+        result = trader.place_multileg_order(
+            symbol=tracked.symbol,
+            legs=legs,
+            order_type="debit",
+            duration="day",
+            price=limit_debit,
+            tag=tracked.tag,  # same tag so close detection + P&L calc can match
+        )
+        order = result.get("order", {})
+        order_id = order.get("id", "unknown")
+        status = order.get("status", "unknown")
+        detail = f"{summary} order_id={order_id} status={status}"
+        logger.info(detail)
+        return True, detail
+    except Exception as e:
+        detail = f"Close order failed: {e}"
+        logger.error(detail)
+        return False, detail
+
+
 def _format_order_summary(candidate, contracts=1):
     """Concise human-readable summary of an iron condor order.
 

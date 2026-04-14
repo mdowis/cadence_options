@@ -9,10 +9,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from cadence.executor import (
     build_iron_condor_legs,
     build_close_legs,
+    build_close_legs_from_tracked,
     execute_candidate,
+    execute_close,
+    compute_close_debit,
     _validate_leg_count,
     _format_order_summary,
 )
+from cadence.position_tracker import TrackedPosition
 from cadence.risk_manager import RiskManager, RiskConfig, RiskAction
 
 
@@ -222,6 +226,112 @@ class TestExecuteCandidate(unittest.TestCase):
 
         self.assertEqual(self.trader.get_account_balances.call_count, 2,
                          "Must fetch fresh balance on every trade, not use cached")
+
+
+def _tracked_position():
+    return TrackedPosition(
+        tag="cadence-t1", symbol="SPY", expiration="2026-05-30",
+        dte_at_entry=45, contracts=1, entry_credit=2.40,
+        entry_time=1700000000.0,
+        short_put_symbol="SPY260530P00435000",
+        long_put_symbol="SPY260530P00425000",
+        short_call_symbol="SPY260530C00465000",
+        long_call_symbol="SPY260530C00475000",
+        short_put_strike=435, long_put_strike=425,
+        short_call_strike=465, long_call_strike=475,
+    )
+
+
+class TestBuildCloseLegsFromTracked(unittest.TestCase):
+
+    def test_produces_four_close_legs(self):
+        t = _tracked_position()
+        legs = build_close_legs_from_tracked(t)
+        self.assertEqual(len(legs), 4)
+        self.assertEqual(legs[0], ("SPY260530P00435000", "buy_to_close", 1))
+        self.assertEqual(legs[1], ("SPY260530P00425000", "sell_to_close", 1))
+        self.assertEqual(legs[2], ("SPY260530C00465000", "buy_to_close", 1))
+        self.assertEqual(legs[3], ("SPY260530C00475000", "sell_to_close", 1))
+
+    def test_contracts_preserved(self):
+        t = _tracked_position()
+        t.contracts = 5
+        legs = build_close_legs_from_tracked(t)
+        for _, _, qty in legs:
+            self.assertEqual(qty, 5)
+
+
+class TestComputeCloseDebit(unittest.TestCase):
+
+    def _chain_option(self, sym, bid, ask):
+        return {"symbol": sym, "bid": bid, "ask": ask}
+
+    def test_standard_close_debit(self):
+        trader = MagicMock()
+        trader.get_option_chain.return_value = [
+            self._chain_option("SPY260530P00435000", 0.40, 0.50),
+            self._chain_option("SPY260530P00425000", 0.10, 0.20),
+            self._chain_option("SPY260530C00465000", 0.30, 0.40),
+            self._chain_option("SPY260530C00475000", 0.05, 0.15),
+        ]
+        t = _tracked_position()
+        debit, chain = compute_close_debit(trader, t)
+        # debit = short_put_ask(0.50) + short_call_ask(0.40)
+        #       - long_put_bid(0.10) - long_call_bid(0.05) = 0.75
+        self.assertAlmostEqual(debit, 0.75, places=2)
+
+    def test_chain_fetch_failure_returns_none(self):
+        trader = MagicMock()
+        trader.get_option_chain.side_effect = RuntimeError("fail")
+        t = _tracked_position()
+        debit, chain = compute_close_debit(trader, t)
+        self.assertIsNone(debit)
+
+    def test_missing_legs_in_chain(self):
+        trader = MagicMock()
+        trader.get_option_chain.return_value = []  # nothing matches
+        t = _tracked_position()
+        debit, _ = compute_close_debit(trader, t)
+        # All four legs missing -> returns None (can't price)
+        self.assertIsNone(debit)
+
+
+class TestExecuteClose(unittest.TestCase):
+
+    def test_dry_run_doesnt_submit(self):
+        trader = MagicMock()
+        t = _tracked_position()
+        ok, detail = execute_close(trader, t, limit_debit=0.80,
+                                    dry_run=True, reason="profit_target")
+        self.assertTrue(ok)
+        self.assertIn("[DRY RUN]", detail)
+        self.assertIn("profit_target", detail)
+        trader.place_multileg_order.assert_not_called()
+
+    def test_live_submits_debit_order_with_tag(self):
+        trader = MagicMock()
+        trader.place_multileg_order.return_value = {
+            "order": {"id": 42, "status": "ok"}
+        }
+        t = _tracked_position()
+        ok, detail = execute_close(trader, t, limit_debit=0.80,
+                                    dry_run=False, reason="profit_target")
+        self.assertTrue(ok)
+        self.assertIn("42", detail)
+        # The close must reuse the tag so close detection + P&L calc match
+        kwargs = trader.place_multileg_order.call_args.kwargs
+        self.assertEqual(kwargs["tag"], t.tag)
+        self.assertEqual(kwargs["order_type"], "debit")
+        self.assertEqual(kwargs["price"], 0.80)
+
+    def test_live_failure_returns_false(self):
+        trader = MagicMock()
+        trader.place_multileg_order.side_effect = RuntimeError("rejected")
+        t = _tracked_position()
+        ok, detail = execute_close(trader, t, limit_debit=0.80,
+                                    dry_run=False, reason="loss_stop")
+        self.assertFalse(ok)
+        self.assertIn("failed", detail.lower())
 
 
 if __name__ == "__main__":

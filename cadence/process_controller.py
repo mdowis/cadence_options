@@ -109,6 +109,10 @@ class ProcessController:
 
         self._attempts_lock = threading.Lock()
         self._recent_attempts = {}  # fingerprint -> timestamp
+        # Separate dedup for auto-exit close submissions so we don't
+        # spam close orders every sync cycle.
+        self._exit_attempts_lock = threading.Lock()
+        self._recent_exit_attempts = {}  # tag -> timestamp
 
         self._last_status_time = 0
 
@@ -417,6 +421,12 @@ class ProcessController:
         if self.position_tracker is not None and positions is not None:
             self._detect_and_record_closes(positions)
 
+        # For still-open tracked positions, check exit conditions and
+        # submit close orders for any that hit profit target / time
+        # stop / loss stop.
+        if self.position_manager is not None and self.position_tracker is not None:
+            self._check_and_submit_exits()
+
     def _detect_and_record_closes(self, broker_positions):
         """For any tracked position whose legs no longer appear at the
         broker, fetch the closing order fills and record realized P&L."""
@@ -453,6 +463,85 @@ class ProcessController:
 
             # Stop tracking locally regardless of whether we got P&L
             self.position_tracker.remove(tracked.tag)
+
+    def _check_and_submit_exits(self):
+        """For each still-open tracked position, compute the cost to close,
+        feed into position_manager.check_for_exits, and submit close
+        orders for positions that hit profit target / time stop / loss stop.
+
+        Dedup: once we submit a close for a tag, we don't submit
+        another for ATTEMPT_TTL_SECS -- gives the open close order
+        time to fill. Once the fill removes the position from Tradier
+        the tracker removes it on the next sync, so no further exits
+        will ever fire for that tag.
+        """
+        from cadence.executor import compute_close_debit, execute_close
+
+        tracked_list = self.position_tracker.get_open()
+        if not tracked_list:
+            return
+
+        now = time.time()
+        # Clean expired exit-attempt dedup entries
+        with self._exit_attempts_lock:
+            expired = [tag for tag, t in self._recent_exit_attempts.items()
+                       if now - t > self.ATTEMPT_TTL_SECS]
+            for tag in expired:
+                del self._recent_exit_attempts[tag]
+
+        # Build position dicts (shape that PositionManager expects) and
+        # keep a debit lookup for close-order pricing.
+        position_dicts = []
+        debits_by_tag = {}
+        for t in tracked_list:
+            debit, _chain = compute_close_debit(self.trader, t)
+            if debit is None:
+                continue
+            debits_by_tag[t.tag] = debit
+            position_dicts.append({
+                "id": t.tag,
+                "entry_credit": t.entry_credit,
+                "current_debit": debit,
+                "dte": t.current_dte(),
+            })
+
+        if not position_dicts:
+            return
+
+        try:
+            exits = self.position_manager.check_for_exits(position_dicts)
+        except Exception as e:
+            logger.warning("Exit check failed: %s", e)
+            return
+
+        for action in exits:
+            tag = action.position_id
+            with self._exit_attempts_lock:
+                if tag in self._recent_exit_attempts:
+                    continue  # already submitted within TTL
+                self._recent_exit_attempts[tag] = now
+
+            tracked = self.position_tracker.get_by_tag(tag)
+            if tracked is None:
+                continue
+            debit = debits_by_tag.get(tag, tracked.entry_credit)
+            try:
+                ok, detail = execute_close(
+                    self.trader, tracked, limit_debit=debit,
+                    dry_run=self.dry_run, reason=action.reason.value,
+                )
+            except Exception as e:
+                logger.warning("Auto-exit execute_close for %s raised: %s",
+                               tag, e)
+                continue
+            logger.info("Auto-exit %s -> %s: %s",
+                        tag, "OK" if ok else "FAIL", detail)
+            if ok and self.notifier:
+                try:
+                    self.notifier.send(
+                        f"Auto-exit ({action.reason.value}): {detail}")
+                except Exception:
+                    pass
 
     # -- Helpers for setting dry_run mode ------------------------------------
 

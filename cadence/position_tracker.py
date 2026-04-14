@@ -35,7 +35,8 @@ class TrackedPosition:
     __slots__ = (
         "tag", "symbol", "expiration", "dte_at_entry", "contracts",
         "entry_credit", "entry_credit_mid", "entry_underlying_price",
-        "entry_time",
+        "iv_rank_at_entry", "entry_time",
+        "close_attempted_reason",
         "short_put_symbol", "long_put_symbol",
         "short_call_symbol", "long_call_symbol",
         "short_put_strike", "long_put_strike",
@@ -49,7 +50,9 @@ class TrackedPosition:
                  short_put_strike, long_put_strike,
                  short_call_strike, long_call_strike,
                  entry_credit_mid=None,
-                 entry_underlying_price=None):
+                 entry_underlying_price=None,
+                 iv_rank_at_entry=None,
+                 close_attempted_reason=None):
         self.tag = tag
         self.symbol = symbol
         self.expiration = expiration
@@ -68,6 +71,13 @@ class TrackedPosition:
         # None for legacy entries (recorded before this field existed)
         # and for adopted entries (we don't know historical spot).
         self.entry_underlying_price = entry_underlying_price
+        # IV rank at strategy time -- captured so the trade ledger can
+        # analyze whether the IV rank filter was predictive of outcomes.
+        self.iv_rank_at_entry = iv_rank_at_entry
+        # Set by execute_close when the bot submits a close order so
+        # the ledger knows WHY it closed (profit_target / time_stop /
+        # loss_stop / manual). Stays None for external closes.
+        self.close_attempted_reason = close_attempted_reason
         self.entry_time = entry_time              # unix ts
         self.short_put_symbol = short_put_symbol
         self.long_put_symbol = long_put_symbol
@@ -145,6 +155,7 @@ class PositionTracker:
         # Capture midpoint credit for fair-mark P&L. Older candidates
         # without credit_mid attribute fall back to credit.
         credit_mid = getattr(candidate, "credit_mid", candidate.credit)
+        iv_rank = getattr(candidate, "iv_rank", None)
         pos = TrackedPosition(
             tag=tag,
             symbol=candidate.symbol,
@@ -154,6 +165,7 @@ class PositionTracker:
             entry_credit=candidate.credit,
             entry_credit_mid=credit_mid,
             entry_underlying_price=entry_underlying_price,
+            iv_rank_at_entry=iv_rank,
             entry_time=entry_time,
             short_put_symbol=candidate.short_put_symbol,
             long_put_symbol=candidate.long_put_symbol,
@@ -206,6 +218,17 @@ class PositionTracker:
         with self._lock:
             self._positions.pop(tag, None)
             self._save_unlocked()
+
+    def mark_closing(self, tag, reason):
+        """Flag that we submitted a close order for this tag with the
+        given reason (profit_target/time_stop/loss_stop/manual). The
+        trade ledger reads this at close-detection time so it knows
+        which exit rule fired."""
+        with self._lock:
+            pos = self._positions.get(tag)
+            if pos is not None:
+                pos.close_attempted_reason = reason
+                self._save_unlocked()
 
     def position_was_filled(self, tracked, trader):
         """True if any order with this tag has been filled.

@@ -371,9 +371,39 @@ HIGHER than Entry = loss.">Current</th>
     </div>
   </div>
 
-  <!-- Recent Trades (closed) -->
+  <!-- Strategy Performance (full ledger view) -->
   <div class="panel">
-    <div class="panel-title" title="Trades that have CLOSED, with realized P&amp;L. UNRESOLVED entries are closes the bot detected but couldn't compute a P&amp;L for (manual close in Tradier UI, expiration, etc.).">Recent Trades (closed)</div>
+    <div class="panel-title" title="Aggregated stats from the full
+trade ledger. Use these to decide whether to tweak the strategy.">
+      Strategy Performance
+    </div>
+    <div id="ledger-stats" style="display:flex;gap:18px;flex-wrap:wrap;
+         font-size:12px;margin-bottom:10px"></div>
+    <div id="ledger-by-reason" style="font-size:11px;color:var(--dim);
+         margin-bottom:10px"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Closed</th>
+          <th>Sym</th>
+          <th>DTE@entry</th>
+          <th>IVR@entry</th>
+          <th>Held</th>
+          <th>Reason</th>
+          <th>Underlying move</th>
+          <th>P&amp;L</th>
+          <th>%Risk</th>
+        </tr>
+      </thead>
+      <tbody id="ledger-body">
+        <tr><td colspan="9" class="empty-row">No closed trades yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Recent Trades (legacy minimal view from risk_manager) -->
+  <div class="panel">
+    <div class="panel-title" title="Trades that have CLOSED, sparse view from risk manager. The Strategy Performance panel above has the full record.">Recent Trades (closed)</div>
     <table>
       <thead>
         <tr>
@@ -1409,6 +1439,105 @@ async function doCloseTracked(tag) {
   doRefresh();
 }
 
+// ---- Strategy performance from the trade ledger ----
+function renderLedger(payload) {
+  var stats = (payload && payload.stats) || {};
+  var records = (payload && payload.records) || [];
+
+  // Headline stats row
+  var statsHost = el('ledger-stats');
+  if (stats.n) {
+    var winColor = stats.win_rate >= 60 ? 'var(--green)' :
+                   stats.win_rate >= 40 ? 'var(--yellow)' : 'var(--red)';
+    var totalColor = stats.total_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    statsHost.innerHTML =
+      '<div><span style="color:var(--dim)">Trades:</span> ' +
+        '<strong>' + stats.n + '</strong></div>' +
+      '<div><span style="color:var(--dim)">Win rate:</span> ' +
+        '<strong style="color:' + winColor + '">' +
+        stats.win_rate.toFixed(1) + '%</strong> (' +
+        stats.wins + 'W / ' + stats.losses + 'L)</div>' +
+      '<div><span style="color:var(--dim)">Avg win:</span> ' +
+        '<strong style="color:var(--green)">$' +
+        stats.avg_win.toFixed(2) + '</strong></div>' +
+      '<div><span style="color:var(--dim)">Avg loss:</span> ' +
+        '<strong style="color:var(--red)">$' +
+        stats.avg_loss.toFixed(2) + '</strong></div>' +
+      '<div><span style="color:var(--dim)">Total realized:</span> ' +
+        '<strong style="color:' + totalColor + '">$' +
+        stats.total_pnl.toFixed(2) + '</strong></div>' +
+      '<div><span style="color:var(--dim)">Avg held:</span> ' +
+        '<strong>' + stats.avg_duration_days.toFixed(1) + ' days' +
+        '</strong></div>';
+  } else {
+    statsHost.innerHTML = '<span style="color:var(--dim)">' +
+      'No closed trades yet -- stats appear after the first close.</span>';
+  }
+
+  // Per-exit-reason breakdown
+  var reasonHost = el('ledger-by-reason');
+  var reasonBits = [];
+  if (stats.by_exit_reason) {
+    for (var reason in stats.by_exit_reason) {
+      var r = stats.by_exit_reason[reason];
+      var wr = r.count ? (r.wins / r.count * 100) : 0;
+      reasonBits.push(
+        '<span><strong style="color:var(--text)">' + esc(reason) +
+        ':</strong> ' + r.count + ' (' + wr.toFixed(0) +
+        '% win, $' + r.total_pnl.toFixed(2) + ')</span>'
+      );
+    }
+  }
+  reasonHost.innerHTML = reasonBits.length
+      ? 'By exit reason: ' + reasonBits.join(' &nbsp;|&nbsp; ')
+      : '';
+
+  // Trade rows (newest first)
+  var tbody = el('ledger-body');
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">' +
+      'No closed trades yet</td></tr>';
+    return;
+  }
+  var rows = records.slice().reverse();
+  tbody.innerHTML = rows.map(function(r) {
+    var pnl = r.pnl_dollars || 0;
+    var pnlColor = pnl > 0 ? 'var(--green)' :
+                   pnl < 0 ? 'var(--red)' : 'var(--dim)';
+    var dur = r.duration_days != null
+              ? r.duration_days.toFixed(1) + 'd' : '--';
+    var move = r.underlying_move_pct != null
+              ? (r.underlying_move >= 0 ? '+' : '') +
+                '$' + r.underlying_move.toFixed(2) +
+                ' (' + (r.underlying_move_pct >= 0 ? '+' : '') +
+                r.underlying_move_pct.toFixed(2) + '%)'
+              : '--';
+    var reasonColor = r.exit_reason === 'profit_target' ? 'var(--green)' :
+                      r.exit_reason === 'loss_stop' ? 'var(--red)' :
+                      r.exit_reason === 'time_stop' ? 'var(--yellow)' :
+                      r.exit_reason === 'UNRESOLVED' ? 'var(--orange)' :
+                      'var(--text)';
+    var rorPct = r.return_on_risk_pct != null
+                 ? r.return_on_risk_pct.toFixed(1) + '%' : '--';
+    var ivr = r.iv_rank_at_entry != null
+              ? r.iv_rank_at_entry.toFixed(0) : '--';
+    var when = r.exit_time_iso || '';
+    return '<tr>' +
+      '<td style="font-size:11px">' + esc(when) + '</td>' +
+      '<td>' + esc(r.symbol || '--') + '</td>' +
+      '<td>' + (r.dte_at_entry != null ? r.dte_at_entry : '--') + '</td>' +
+      '<td>' + ivr + '</td>' +
+      '<td>' + dur + '</td>' +
+      '<td style="color:' + reasonColor + '">' +
+        esc(r.exit_reason || '--') + '</td>' +
+      '<td style="font-size:11px">' + move + '</td>' +
+      '<td style="color:' + pnlColor + ';font-weight:600">' +
+        (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2) + '</td>' +
+      '<td style="color:' + pnlColor + '">' + rorPct + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
 // ---- Recent closed trades ----
 function renderTrades(trades) {
   var tbody = el('trades-body');
@@ -1507,6 +1636,7 @@ async function doRefresh() {
     api('GET', '/api/diagnostics'),
     api('GET', '/api/tracked-positions'),
     api('GET', '/api/iv_rank'),
+    api('GET', '/api/trade-ledger'),
   ]);
 
   var risk = results[0];
@@ -1514,6 +1644,7 @@ async function doRefresh() {
   var diag = results[2];
   var tracked = results[3];
   var ivRank = results[4];
+  var ledger = results[5];
 
   // ---- Risk data ----
   if (risk && !risk._error) {
@@ -1722,6 +1853,11 @@ async function doRefresh() {
   // ---- Tracked iron condors ----
   if (tracked && !tracked._error) {
     renderTracked(tracked.tracked || []);
+  }
+
+  // ---- Strategy performance ledger ----
+  if (ledger && !ledger._error) {
+    renderLedger(ledger);
   }
 
   // ---- IV Rank ----

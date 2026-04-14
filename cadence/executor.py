@@ -151,12 +151,17 @@ def compute_close_debit_mid(trader, tracked):
     return debit, by_sym
 
 
-def execute_close(trader, tracked, limit_debit, dry_run=True, reason=""):
+def execute_close(trader, tracked, limit_debit, dry_run=True, reason="",
+                  tracker=None):
     """Submit a closing debit order for a tracked iron condor position.
 
     limit_debit is per-share. The order is submitted at that price as
     a day limit; if the market moves away it won't fill and we'll
     retry on the next cycle.
+
+    If `tracker` is provided, the tracked position is annotated with
+    the close reason so the trade ledger can record it at close-
+    detection time.
     """
     legs = build_close_legs_from_tracked(tracked)
     _validate_leg_count(legs)
@@ -183,6 +188,13 @@ def execute_close(trader, tracked, limit_debit, dry_run=True, reason=""):
         status = order.get("status", "unknown")
         detail = f"{summary} order_id={order_id} status={status}"
         logger.info(detail)
+        # Annotate the tracker so the ledger records the reason when
+        # the close eventually fills.
+        if tracker is not None and reason:
+            try:
+                tracker.mark_closing(tracked.tag, reason)
+            except Exception as e:
+                logger.warning("Could not mark close reason: %s", e)
         return True, detail
     except Exception as e:
         detail = f"Close order failed: {e}"

@@ -12,6 +12,7 @@ build/
 risk_state.json
 position_tracker.json
 executor_state.json
+trade_ledger.jsonl
 
 # OS
 .DS_Store

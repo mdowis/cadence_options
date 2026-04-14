@@ -88,7 +88,8 @@ class ProcessController:
     def __init__(self, trader, risk_mgr, strategy_config, notifier=None,
                  scan_interval=60, position_interval=30, dry_run=True,
                  status_interval_secs=3600, position_manager=None,
-                 position_tracker=None, state_file=None):
+                 position_tracker=None, state_file=None,
+                 trade_ledger=None):
         self.trader = trader
         self.risk_mgr = risk_mgr
         self.strategy_config = strategy_config
@@ -98,6 +99,7 @@ class ProcessController:
         self.status_interval_secs = status_interval_secs
         self.position_manager = position_manager
         self.position_tracker = position_tracker
+        self.trade_ledger = trade_ledger
         self._state_file = state_file
         # Restore persisted dry_run if a state file is configured.
         # Otherwise the bot would silently revert to dry_run=True on
@@ -574,9 +576,16 @@ class ProcessController:
                 detail = (detail if isinstance(detail, str)
                           else f"{tracked.symbol} IC closed (P&L unknown)")
                 self.risk_mgr.record_trade(0, f"UNRESOLVED: {detail}")
+                self._write_ledger_record(
+                    tracked, 0, None, "UNRESOLVED",
+                    detail=f"UNRESOLVED: {detail}")
                 logger.warning("Recorded close with unknown P&L: %s", detail)
             else:
                 self.risk_mgr.record_trade(pnl_cents, detail)
+                self._write_ledger_record(tracked, pnl_cents,
+                                          close_debit=None,  # extracted below
+                                          exit_reason=None,
+                                          detail=detail)
                 logger.info("Recorded close: %s", detail)
                 if self.notifier:
                     try:
@@ -586,6 +595,33 @@ class ProcessController:
 
             # Stop tracking locally regardless of whether we got P&L
             self.position_tracker.remove(tracked.tag)
+
+    def _write_ledger_record(self, tracked, pnl_cents, close_debit,
+                              exit_reason, detail=None):
+        """Fan out the close event to the trade ledger with full context."""
+        if self.trade_ledger is None:
+            return
+        # Prefer tracker-set reason (auto-exit or manual) over caller-
+        # supplied one, since the tracker stores what execute_close
+        # annotated when the close order was submitted.
+        reason = getattr(tracked, "close_attempted_reason", None) or exit_reason
+        if not reason:
+            reason = "external"  # close wasn't submitted by the bot
+        # Try to grab the close underlying price; best-effort, non-fatal
+        close_spot = None
+        try:
+            q = self.trader.get_quote(tracked.symbol)
+            close_spot = float(q.get("last") or q.get("close") or 0) or None
+        except Exception:
+            close_spot = None
+        try:
+            self.trade_ledger.record_close(
+                tracked, pnl_cents=pnl_cents, close_debit=close_debit,
+                close_underlying_price=close_spot,
+                exit_reason=reason, detail=detail,
+            )
+        except Exception as e:
+            logger.warning("Trade ledger write failed: %s", e)
 
     def _check_and_submit_exits(self):
         """For each still-open tracked position, compute the cost to close,
@@ -657,6 +693,7 @@ class ProcessController:
                 ok, detail = execute_close(
                     self.trader, tracked, limit_debit=debit,
                     dry_run=self.dry_run, reason=action.reason.value,
+                    tracker=self.position_tracker,
                 )
             except Exception as e:
                 logger.warning("Auto-exit execute_close for %s raised: %s",

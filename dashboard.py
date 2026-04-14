@@ -15,6 +15,7 @@ from cadence.strategy import StrategyConfig
 from cadence.process_controller import ProcessController
 from cadence.position_manager import PositionManager
 from cadence.position_tracker import PositionTracker
+from cadence.trade_ledger import TradeLedger
 from cadence.notifier import build_from_env
 from cadence.iv_rank import compute_iv_rank, get_cached_iv_rank
 
@@ -31,6 +32,7 @@ _process_ctrl = None
 _notifier = None
 _position_mgr = None
 _position_tracker = None
+_trade_ledger = None
 _env_path = None
 _script_dir = None
 
@@ -443,6 +445,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     })
             self._send_json({"tracked": tracked_info})
 
+        elif path == "/api/trade-ledger":
+            # Full closed-trade records with entry+exit context, plus
+            # aggregate stats for strategy analysis.
+            if not _trade_ledger:
+                self._send_json({"records": [], "stats": {}})
+                return
+            records = _trade_ledger.read_all(limit=200)
+            stats = _trade_ledger.summary_stats()
+            self._send_json({"records": records, "stats": stats})
+
         elif path == "/api/diagnostics":
             tradier_env = _env("TRADIER_ENV", "sandbox")
             token, acct, cred_source = _resolve_tradier_creds(tradier_env)
@@ -626,6 +638,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ok, detail = execute_close(
                 _trader, tracked, limit_debit=debit,
                 dry_run=dry, reason="manual",
+                tracker=_position_tracker,
             )
             # Trigger an immediate broker sync so the dashboard reflects
             # the close within ~1 second (instead of waiting for the
@@ -1066,7 +1079,7 @@ def _env_float_field(d, key):
 
 def main():
     global _trader, _risk_mgr, _process_ctrl, _notifier, _position_mgr
-    global _position_tracker, _env_path, _script_dir
+    global _position_tracker, _trade_ledger, _env_path, _script_dir
 
     _script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -1130,6 +1143,11 @@ def main():
     tracker_state_file = _env("CADENCE_TRACKER_STATE_FILE", "position_tracker.json")
     _position_tracker = PositionTracker(state_file=tracker_state_file or None)
 
+    # Trade ledger: append-only JSONL of all closed trades with full
+    # entry+exit context for strategy analysis.
+    ledger_file = _env("CADENCE_TRADE_LEDGER_FILE", "trade_ledger.jsonl")
+    _trade_ledger = TradeLedger(path=ledger_file or None)
+
     # Process controller. Persist its state (currently just dry_run)
     # so toggling to PAPER or LIVE survives a restart instead of
     # silently reverting to dry_run -- which would cause Close button
@@ -1147,6 +1165,7 @@ def main():
         position_manager=_position_mgr,
         position_tracker=_position_tracker,
         state_file=executor_state_file or None,
+        trade_ledger=_trade_ledger,
     )
     print(f"[Cadence] Executor mode: "
           f"{'DRY RUN' if _process_ctrl.dry_run else 'LIVE/PAPER'}")

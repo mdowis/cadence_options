@@ -340,8 +340,13 @@ that share legs at the broker.">Open Iron Condors (tracker)</div>
     <table>
       <thead>
         <tr>
-          <th>Ticker</th><th>Exp</th><th>DTE</th>
-          <th>Put Spread</th><th>Call Spread</th>
+          <th>Ticker</th>
+          <th title="Underlying price relative to the four strikes.
+Green zone = profit zone (between short strikes).
+Yellow = warning (between short and long on either side).
+Red = max loss zone (beyond long strikes).
+Blue line = current underlying price.">Position</th>
+          <th>Exp</th><th>DTE</th>
           <th>Qty</th>
           <th title="Credit at entry, at midpoint. Pre-upgrade entries
 show the conservative (bid-side) value -- flagged with *.">Entry</th>
@@ -349,7 +354,9 @@ show the conservative (bid-side) value -- flagged with *.">Entry</th>
 LOWER than Entry = profit (cost to close dropped below what you received).
 HIGHER than Entry = loss.">Current</th>
           <th title="(Entry - Current) x contracts x 100">P&amp;L</th>
-          <th>P&amp;L%</th><th>Tag</th><th></th>
+          <th>P&amp;L%</th>
+          <th title="Distance from current underlying price to nearest short strike, as % of underlying. Positive on both sides = inside profit zone.">Buffer</th>
+          <th>Tag</th><th></th>
         </tr>
       </thead>
       <tbody id="tracked-body">
@@ -950,6 +957,67 @@ function toggleCandidate(i) {
   if (window._lastCandidates) renderCandidates(window._lastCandidates);
 }
 
+// Inline SVG strike ladder showing the four IC strikes with profit
+// zones and the current underlying price marker.
+function strikeLadderSvg(p) {
+  if (!p.long_put_strike || !p.long_call_strike) return '';
+  var lp = p.long_put_strike;
+  var sp = p.short_put_strike;
+  var sc = p.short_call_strike;
+  var lc = p.long_call_strike;
+  var cur = p.current_price;
+  // Add padding beyond the long strikes so the 'beyond longs = max
+  // loss' zone is visible. Pad more if current price is outside.
+  var basePad = (lc - lp) * 0.25;
+  var min = Math.min(lp - basePad, cur != null ? cur : lp);
+  var max = Math.max(lc + basePad, cur != null ? cur : lc);
+  var range = max - min;
+  if (range <= 0) return '';
+  var w = 160, h = 32;
+  function x(s) { return ((s - min) / range) * w; }
+  var parts = [];
+  parts.push('<svg width="' + w + '" height="' + h +
+             '" style="vertical-align:middle;display:block">');
+  // Zones (background)
+  // Red: beyond longs (max loss)
+  parts.push('<rect x="0" y="6" width="' + x(lp) +
+             '" height="20" fill="rgba(239,68,68,0.20)"/>');
+  parts.push('<rect x="' + x(lc) + '" y="6" width="' + (w - x(lc)) +
+             '" height="20" fill="rgba(239,68,68,0.20)"/>');
+  // Yellow: between long and short on each side (partial loss zone)
+  parts.push('<rect x="' + x(lp) + '" y="6" width="' + (x(sp) - x(lp)) +
+             '" height="20" fill="rgba(234,179,8,0.18)"/>');
+  parts.push('<rect x="' + x(sc) + '" y="6" width="' + (x(lc) - x(sc)) +
+             '" height="20" fill="rgba(234,179,8,0.18)"/>');
+  // Green: between shorts (profit zone at expiration)
+  parts.push('<rect x="' + x(sp) + '" y="6" width="' + (x(sc) - x(sp)) +
+             '" height="20" fill="rgba(34,197,94,0.25)"/>');
+  // Strike vertical lines (longs thin red, shorts thicker green)
+  parts.push('<line x1="' + x(lp) + '" x2="' + x(lp) +
+             '" y1="6" y2="26" stroke="#ef4444" stroke-width="1"/>');
+  parts.push('<line x1="' + x(sp) + '" x2="' + x(sp) +
+             '" y1="4" y2="28" stroke="#22c55e" stroke-width="1.5"/>');
+  parts.push('<line x1="' + x(sc) + '" x2="' + x(sc) +
+             '" y1="4" y2="28" stroke="#22c55e" stroke-width="1.5"/>');
+  parts.push('<line x1="' + x(lc) + '" x2="' + x(lc) +
+             '" y1="6" y2="26" stroke="#ef4444" stroke-width="1"/>');
+  // Current underlying marker (cyan)
+  if (cur != null && cur > 0) {
+    var cx = x(cur);
+    parts.push('<line x1="' + cx + '" x2="' + cx +
+               '" y1="0" y2="32" stroke="#06b6d4" stroke-width="2"/>');
+    parts.push('<polygon points="' + (cx - 4) + ',0 ' + (cx + 4) +
+               ',0 ' + cx + ',6" fill="#06b6d4"/>');
+  }
+  parts.push('</svg>');
+  // Strike labels below
+  var label = '<div style="font-size:9px;color:var(--dim);' +
+              'display:flex;justify-content:space-between;width:160px">' +
+              '<span>' + lp + '</span><span>' + sp + '</span>' +
+              '<span>' + sc + '</span><span>' + lc + '</span></div>';
+  return parts.join('') + label;
+}
+
 // ---- Tracked iron condors (one row per entry order with P&L at midpoint) ----
 function renderTracked(tracked) {
   var tbody = el('tracked-body');
@@ -1007,17 +1075,32 @@ function renderTracked(tracked) {
     }[source] || 'Entry credit';
     var tag = p.tag || '';
     var tagShort = tag.length > 14 ? tag.substring(0, 14) + '..' : tag;
-    return '<tr title="tag=' + esc(tag) + '">' +
+    // Buffer column: distance from current underlying to nearest
+    // short strike, as % of underlying. Color by closeness to danger.
+    var bufferStr = '--';
+    if (p.put_buffer_pct != null && p.call_buffer_pct != null) {
+      var pBufColor = p.put_buffer_pct < 1 ? 'var(--red)' :
+                      p.put_buffer_pct < 3 ? 'var(--yellow)' : 'var(--green)';
+      var cBufColor = p.call_buffer_pct < 1 ? 'var(--red)' :
+                      p.call_buffer_pct < 3 ? 'var(--yellow)' : 'var(--green)';
+      bufferStr = '<span style="color:' + pBufColor + '">' +
+                  p.put_buffer_pct.toFixed(1) + '%\u2193</span> ' +
+                  '<span style="color:' + cBufColor + '">' +
+                  p.call_buffer_pct.toFixed(1) + '%\u2191</span>';
+    }
+    var spotLabel = p.current_price
+        ? ' (spot $' + p.current_price.toFixed(2) + ')' : '';
+    return '<tr title="tag=' + esc(tag) + spotLabel + '">' +
       '<td>' + esc(p.symbol || '--') + '</td>' +
+      '<td>' + strikeLadderSvg(p) + '</td>' +
       '<td>' + esc(p.expiration || '--') + '</td>' +
       '<td style="color:' + dteColor + '">' + (dte != null ? dte : '--') + '</td>' +
-      '<td>' + (p.long_put_strike || '--') + '/' + (p.short_put_strike || '--') + '</td>' +
-      '<td>' + (p.short_call_strike || '--') + '/' + (p.long_call_strike || '--') + '</td>' +
       '<td>' + (p.contracts || 1) + '</td>' +
       '<td title="' + esc(entryTitle) + '">' + entryStr + '</td>' +
       '<td style="color:' + currentColor + '">' + currentStr + '</td>' +
       '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
+      '<td style="font-size:11px">' + bufferStr + '</td>' +
       '<td style="font-size:10px;color:var(--dim);font-family:var(--font)">' + esc(tagShort) + '</td>' +
       '<td>' +
         '<button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(tag) + '\')" title="Submit a close order to the broker">Close</button> ' +

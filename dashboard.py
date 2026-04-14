@@ -335,6 +335,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             from cadence.executor import (
                 compute_close_debit_mid, _legs_from_chain, _safe_float)
             tracked_info = []
+            # Cache underlying quotes per request -- multiple ICs
+            # often share the same underlying.
+            _spot_cache = {}
+            def _get_spot(sym):
+                if sym in _spot_cache:
+                    return _spot_cache[sym]
+                try:
+                    q = _trader.get_quote(sym)
+                    spot = _safe_float(q.get("last")) or _safe_float(q.get("close"))
+                except Exception:
+                    spot = 0
+                _spot_cache[sym] = spot
+                return spot
             if _position_tracker and _trader and _trader.authenticated:
                 # Prefer actual fill price from Tradier's order history
                 # over our pre-fill midpoint estimate.
@@ -405,6 +418,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "short_call_strike": t.short_call_strike,
                         "long_call_strike": t.long_call_strike,
                         "entry_time": t.entry_time,
+                        # Visualization data: underlying price right now,
+                        # plus distance-to-short-strike buffers in dollars
+                        # and percent. Lets the frontend render an inline
+                        # strike ladder + danger indicator without needing
+                        # extra round trips.
+                        "current_price": _get_spot(t.symbol),
+                        "put_buffer_dollars":
+                            _get_spot(t.symbol) - t.short_put_strike
+                            if _get_spot(t.symbol) else None,
+                        "call_buffer_dollars":
+                            t.short_call_strike - _get_spot(t.symbol)
+                            if _get_spot(t.symbol) else None,
+                        "put_buffer_pct":
+                            ((_get_spot(t.symbol) - t.short_put_strike)
+                             / _get_spot(t.symbol) * 100)
+                            if _get_spot(t.symbol) else None,
+                        "call_buffer_pct":
+                            ((t.short_call_strike - _get_spot(t.symbol))
+                             / _get_spot(t.symbol) * 100)
+                            if _get_spot(t.symbol) else None,
                     })
             self._send_json({"tracked": tracked_info})
 

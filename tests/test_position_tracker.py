@@ -128,6 +128,67 @@ class TestPositionTracker(unittest.TestCase):
         self.assertEqual(len(self.tracker.get_open()), 0)
 
 
+class TestPositionWasFilled(unittest.TestCase):
+
+    def _tracker_with_entry(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(path)
+        t = PositionTracker(state_file=path)
+        c = FakeCandidate()
+        t.record_entry(c, tag="cadence-abc", contracts=1)
+        return t, path
+
+    def test_returns_true_when_filled_order_exists(self):
+        t, path = self._tracker_with_entry()
+        try:
+            trader = MagicMock()
+            trader.get_orders.return_value = [
+                {"tag": "cadence-abc", "status": "filled"},
+            ]
+            pos = t.get_by_tag("cadence-abc")
+            self.assertTrue(t.position_was_filled(pos, trader))
+        finally:
+            os.unlink(path)
+
+    def test_returns_false_when_no_orders_match(self):
+        t, path = self._tracker_with_entry()
+        try:
+            trader = MagicMock()
+            trader.get_orders.return_value = [
+                {"tag": "different-tag", "status": "filled"},
+            ]
+            pos = t.get_by_tag("cadence-abc")
+            self.assertFalse(t.position_was_filled(pos, trader))
+        finally:
+            os.unlink(path)
+
+    def test_returns_false_when_only_pending_orders(self):
+        """Order placed but not filled (limit didn't hit) -> not filled."""
+        t, path = self._tracker_with_entry()
+        try:
+            trader = MagicMock()
+            trader.get_orders.return_value = [
+                {"tag": "cadence-abc", "status": "open"},
+                {"tag": "cadence-abc", "status": "pending"},
+            ]
+            pos = t.get_by_tag("cadence-abc")
+            self.assertFalse(t.position_was_filled(pos, trader))
+        finally:
+            os.unlink(path)
+
+    def test_returns_false_on_api_error(self):
+        """Defensive default: no record_trade if we can't tell."""
+        t, path = self._tracker_with_entry()
+        try:
+            trader = MagicMock()
+            trader.get_orders.side_effect = RuntimeError("api down")
+            pos = t.get_by_tag("cadence-abc")
+            self.assertFalse(t.position_was_filled(pos, trader))
+        finally:
+            os.unlink(path)
+
+
 class TestComputeRealizedPnL(unittest.TestCase):
 
     def _tracker_with_entry(self, entry_time=1700000000.0):

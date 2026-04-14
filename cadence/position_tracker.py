@@ -186,6 +186,29 @@ class PositionTracker:
             self._positions.pop(tag, None)
             self._save_unlocked()
 
+    def position_was_filled(self, tracked, trader):
+        """True if any order with this tag has been filled.
+
+        Used to distinguish a real close (entry filled, then exited)
+        from a phantom close (entry was placed but never filled, so
+        the legs never appeared in Tradier positions and we mistakenly
+        thought the position 'closed' on the next sync).
+        """
+        try:
+            orders = trader.get_orders()
+        except Exception as e:
+            logger.warning("position_was_filled: get_orders failed: %s", e)
+            # We can't tell -- err on the side of NOT recording a trade
+            # so we don't fabricate a close that didn't happen.
+            return False
+        for o in orders:
+            if o.get("tag") != tracked.tag:
+                continue
+            status = (o.get("status") or "").lower()
+            if status == "filled":
+                return True
+        return False
+
     # -- P&L computation ---------------------------------------------------
 
     def compute_realized_pnl_cents(self, tracked, trader):

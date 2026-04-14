@@ -79,6 +79,11 @@ class ProcessController:
 
     MAX_TRADES_PER_CYCLE = 1
     ATTEMPT_TTL_SECS = 300  # 5-minute dedup
+    # Minimum age before auto-exit will trigger on a new position.
+    # Protects against immediate exits when sandbox chain prices are
+    # stale or wide right after entry, and gives the entry order time
+    # to actually fill before we start computing P&L against it.
+    MIN_POSITION_AGE_SECS = 600  # 10 minutes
 
     def __init__(self, trader, risk_mgr, strategy_config, notifier=None,
                  scan_interval=60, position_interval=30, dry_run=True,
@@ -486,8 +491,25 @@ class ProcessController:
                 pnl_cents, detail = None, None
 
             if pnl_cents is None:
-                # We know it closed but couldn't resolve P&L. Record
-                # a zero-P&L entry so daily counters advance; flag it.
+                # Position is missing from broker positions but we
+                # couldn't find a filled close order. Two cases:
+                #   1. Entry was filled, then closed by something we
+                #      can't identify (manual close in Tradier UI,
+                #      assignment, expiration). Record P&L=0 so the
+                #      tracker advances, log loudly so operator sees it.
+                #   2. Entry was NEVER filled (limit order didn't hit).
+                #      The legs never appeared, so 'all legs missing'
+                #      doesn't mean 'closed' -- it means 'never opened'.
+                #      Silently drop without recording a trade.
+                if not self.position_tracker.position_was_filled(
+                        tracked, self.trader):
+                    logger.info(
+                        "Tracker: dropping unfilled tag=%s "
+                        "(entry order never filled, no trade recorded)",
+                        tracked.tag)
+                    self.position_tracker.remove(tracked.tag)
+                    continue
+                # Filled but we can't resolve close P&L
                 detail = (detail if isinstance(detail, str)
                           else f"{tracked.symbol} IC closed (P&L unknown)")
                 self.risk_mgr.record_trade(0, f"UNRESOLVED: {detail}")
@@ -530,10 +552,15 @@ class ProcessController:
                 del self._recent_exit_attempts[tag]
 
         # Build position dicts (shape that PositionManager expects) and
-        # keep a debit lookup for close-order pricing.
+        # keep a debit lookup for close-order pricing. Skip positions
+        # younger than MIN_POSITION_AGE_SECS so a freshly-opened
+        # position can't be exit-checked against stale chain prices.
         position_dicts = []
         debits_by_tag = {}
         for t in tracked_list:
+            age = now - (t.entry_time or now)
+            if age < self.MIN_POSITION_AGE_SECS:
+                continue
             debit, _chain = compute_close_debit(self.trader, t)
             if debit is None:
                 continue

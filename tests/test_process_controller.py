@@ -261,7 +261,10 @@ class TestAutoExitLoop(unittest.TestCase):
             put_delta=-0.16, call_delta=0.16,
             prob_profit=70, return_pct=30,
         )
-        self.tracker.record_entry(c, tag="t1", contracts=1)
+        # Backdate entry past the auto-exit minimum-age gate so the
+        # exit logic actually runs in tests.
+        old_time = time.time() - (self.pc.MIN_POSITION_AGE_SECS + 60)
+        self.tracker.record_entry(c, tag="t1", contracts=1, entry_time=old_time)
 
     def _chain_option(self, sym, bid, ask):
         return {"symbol": sym, "bid": bid, "ask": ask}
@@ -331,6 +334,142 @@ class TestAutoExitLoop(unittest.TestCase):
         self.trader.get_option_chain.side_effect = RuntimeError("api down")
         # Should not raise
         self.pc._check_and_submit_exits()
+
+
+class TestSpuriousCloseDetection(unittest.TestCase):
+    """Phantom 'closes' for entries that never filled must NOT record
+    trades. Otherwise daily trade_count and Kelly's sample_size get
+    polluted by orders that never actually opened a position."""
+
+    def setUp(self):
+        from cadence.position_manager import PositionManager
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=1000000)
+        self.tracker = PositionTracker(state_file=None)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=False, scan_interval=60,
+            position_manager=PositionManager(),
+            position_tracker=self.tracker,
+        )
+        c = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=2.40, max_loss=7.60,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+        self.tracker.record_entry(c, tag="t-unfilled", contracts=1)
+
+    def test_unfilled_entry_does_not_record_trade(self):
+        """Tradier shows no positions and no filled orders for the tag.
+        Tracker should silently drop the entry, NOT record a $0 close."""
+        self.trader.get_orders.return_value = [
+            {"tag": "t-unfilled", "status": "open"}  # placed but not filled
+        ]
+        # broker_positions is empty -> 'all four legs missing' triggers
+        self.pc._detect_and_record_closes([])
+
+        # No trade should have been recorded
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["daily"]["trade_count"], 0)
+        # Tracker entry was silently dropped
+        self.assertEqual(len(self.tracker.get_open()), 0)
+
+    def test_filled_entry_with_unresolved_close_records_zero(self):
+        """If entry was filled but we can't find a close fill (manual
+        close in Tradier UI, expiration), record 0 with UNRESOLVED tag."""
+        self.trader.get_orders.return_value = [
+            {"tag": "t-unfilled", "status": "filled",
+             "create_date": "2026-04-13T10:00:00.000Z",
+             "type": "credit", "avg_fill_price": 2.40},
+        ]
+        # Even though there's no close order, the entry was filled,
+        # so the position WAS real -- record an UNRESOLVED close.
+        self.pc._detect_and_record_closes([])
+
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["daily"]["trade_count"], 1)
+        # Recorded as UNRESOLVED so operator sees it
+        events = status.get("risk_events", [])
+        self.assertEqual(len(self.tracker.get_open()), 0)
+
+
+class TestAutoExitMinimumAge(unittest.TestCase):
+    """Freshly-opened positions must not be exit-checked. Sandbox option
+    chain prices can be wide/stale right after entry; without a
+    minimum-age gate this could trip an immediate loss-stop close."""
+
+    def setUp(self):
+        from cadence.position_manager import PositionManager
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=1000000)
+        self.tracker = PositionTracker(state_file=None)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=True, scan_interval=60,
+            position_manager=PositionManager(loss_stop_multiplier=2.0),
+            position_tracker=self.tracker,
+        )
+        self.candidate = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=2.40, max_loss=7.60,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+
+    def test_freshly_opened_position_is_not_exit_checked(self):
+        """Position with entry_time = now should not be exit-checked,
+        even if the chain shows a 'loss stop' condition."""
+        self.tracker.record_entry(self.candidate, tag="t-fresh", contracts=1,
+                                   entry_time=time.time())
+        # Chain shows wide spread -> would trigger loss stop if exit-
+        # checked (close debit ~7.20 vs entry 2.40, loss = 4.80,
+        # 2x credit = 4.80 -> trips exactly).
+        self.trader.get_option_chain.return_value = [
+            {"symbol": "SPY260530P00435000", "bid": 4.40, "ask": 4.60},
+            {"symbol": "SPY260530P00425000", "bid": 0.10, "ask": 0.20},
+            {"symbol": "SPY260530C00465000", "bid": 4.30, "ask": 4.50},
+            {"symbol": "SPY260530C00475000", "bid": 0.05, "ask": 0.15},
+        ]
+
+        self.pc._check_and_submit_exits()
+
+        # No exit attempt recorded -- position is too young
+        with self.pc._exit_attempts_lock:
+            self.assertNotIn("t-fresh", self.pc._recent_exit_attempts)
+        # Chain wasn't even fetched (skipped before pricing)
+        self.trader.get_option_chain.assert_not_called()
+
+    def test_aged_position_is_exit_checked(self):
+        """Position older than MIN_POSITION_AGE_SECS gets exit-checked."""
+        old_time = time.time() - (self.pc.MIN_POSITION_AGE_SECS + 60)
+        self.tracker.record_entry(self.candidate, tag="t-old", contracts=1,
+                                   entry_time=old_time)
+        # Chain shows profit-target condition (close debit 0.90, profit 62%)
+        self.trader.get_option_chain.return_value = [
+            {"symbol": "SPY260530P00435000", "bid": 0.45, "ask": 0.55},
+            {"symbol": "SPY260530P00425000", "bid": 0.10, "ask": 0.20},
+            {"symbol": "SPY260530C00465000", "bid": 0.40, "ask": 0.50},
+            {"symbol": "SPY260530C00475000", "bid": 0.05, "ask": 0.15},
+        ]
+        self.pc._check_and_submit_exits()
+
+        with self.pc._exit_attempts_lock:
+            self.assertIn("t-old", self.pc._recent_exit_attempts)
 
 
 class TestBrokerSyncThread(unittest.TestCase):

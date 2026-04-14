@@ -418,6 +418,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "short_call_strike": t.short_call_strike,
                         "long_call_strike": t.long_call_strike,
                         "entry_time": t.entry_time,
+                        "entry_underlying_price": getattr(
+                            t, "entry_underlying_price", None),
                         # Visualization data: underlying price right now,
                         # plus distance-to-short-strike buffers in dollars
                         # and percent. Lets the frontend render an inline

@@ -34,7 +34,8 @@ class TrackedPosition:
 
     __slots__ = (
         "tag", "symbol", "expiration", "dte_at_entry", "contracts",
-        "entry_credit", "entry_credit_mid", "entry_time",
+        "entry_credit", "entry_credit_mid", "entry_underlying_price",
+        "entry_time",
         "short_put_symbol", "long_put_symbol",
         "short_call_symbol", "long_call_symbol",
         "short_put_strike", "long_put_strike",
@@ -47,7 +48,8 @@ class TrackedPosition:
                  short_call_symbol, long_call_symbol,
                  short_put_strike, long_put_strike,
                  short_call_strike, long_call_strike,
-                 entry_credit_mid=None):
+                 entry_credit_mid=None,
+                 entry_underlying_price=None):
         self.tag = tag
         self.symbol = symbol
         self.expiration = expiration
@@ -61,6 +63,11 @@ class TrackedPosition:
         self.entry_credit_mid = (entry_credit_mid
                                  if entry_credit_mid is not None
                                  else entry_credit)
+        # Underlying spot price at entry time -- lets the dashboard
+        # show how far the underlying has moved since we opened.
+        # None for legacy entries (recorded before this field existed)
+        # and for adopted entries (we don't know historical spot).
+        self.entry_underlying_price = entry_underlying_price
         self.entry_time = entry_time              # unix ts
         self.short_put_symbol = short_put_symbol
         self.long_put_symbol = long_put_symbol
@@ -130,7 +137,8 @@ class PositionTracker:
 
     # -- Public API --------------------------------------------------------
 
-    def record_entry(self, candidate, tag, contracts=1, entry_time=None):
+    def record_entry(self, candidate, tag, contracts=1, entry_time=None,
+                     entry_underlying_price=None):
         """Record a new iron condor position we just opened."""
         if entry_time is None:
             entry_time = time.time()
@@ -145,6 +153,7 @@ class PositionTracker:
             contracts=contracts,
             entry_credit=candidate.credit,
             entry_credit_mid=credit_mid,
+            entry_underlying_price=entry_underlying_price,
             entry_time=entry_time,
             short_put_symbol=candidate.short_put_symbol,
             long_put_symbol=candidate.long_put_symbol,

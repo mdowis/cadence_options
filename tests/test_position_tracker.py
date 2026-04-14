@@ -94,6 +94,28 @@ class TestPositionTracker(unittest.TestCase):
         self.tracker.record_entry(c, tag="t1", contracts=1)
         self.assertEqual(self.tracker.get_open()[0].entry_credit_mid, 2.40)
 
+    def test_record_entry_captures_underlying_price(self):
+        """Entry spot is captured for the dashboard's payoff diagram."""
+        c = FakeCandidate()
+        self.tracker.record_entry(c, tag="t1", contracts=1,
+                                   entry_underlying_price=450.32)
+        self.assertEqual(self.tracker.get_open()[0].entry_underlying_price,
+                          450.32)
+
+    def test_entry_underlying_price_persists(self):
+        c = FakeCandidate()
+        self.tracker.record_entry(c, tag="t1",
+                                   entry_underlying_price=450.32)
+        # Reload from disk
+        t2 = PositionTracker(state_file=self.state_path)
+        self.assertEqual(t2.get_open()[0].entry_underlying_price, 450.32)
+
+    def test_entry_underlying_price_defaults_to_none(self):
+        """Old/legacy entries without entry_underlying_price stay None."""
+        c = FakeCandidate()
+        self.tracker.record_entry(c, tag="t1", contracts=1)
+        self.assertIsNone(self.tracker.get_open()[0].entry_underlying_price)
+
     def test_persistence(self):
         c = FakeCandidate()
         self.tracker.record_entry(c, tag="t1")

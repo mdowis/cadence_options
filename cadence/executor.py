@@ -300,7 +300,21 @@ def execute_candidate(trader, risk_mgr, candidate, contracts=1,
         # Record locally so we can detect the close later and compute P&L
         if tracker is not None:
             try:
-                tracker.record_entry(candidate, tag=tag, contracts=contracts)
+                # Capture the underlying spot at entry so the dashboard
+                # can show 'where was SPY when we opened this'.
+                spot_at_entry = None
+                try:
+                    quote = trader.get_quote(candidate.symbol)
+                    spot_at_entry = float(quote.get("last")
+                                           or quote.get("close") or 0)
+                    if spot_at_entry <= 0:
+                        spot_at_entry = None
+                except Exception:
+                    spot_at_entry = None
+                tracker.record_entry(
+                    candidate, tag=tag, contracts=contracts,
+                    entry_underlying_price=spot_at_entry,
+                )
             except Exception as e:
                 logger.warning("Tracker record_entry failed: %s", e)
         return True, detail

@@ -1020,6 +1020,9 @@ function strikeLadderSvg(p) {
 
 // ---- Tracked iron condors (one row per entry order with P&L at midpoint) ----
 function renderTracked(tracked) {
+  // Stash latest data so the click-to-expand handler can find it
+  // by tag without re-fetching.
+  window._lastTracked = tracked;
   var tbody = el('tracked-body');
   if (!tracked || tracked.length === 0) {
     tbody.innerHTML = '<tr><td colspan="12" class="empty-row">No open iron condors</td></tr>';
@@ -1090,7 +1093,10 @@ function renderTracked(tracked) {
     }
     var spotLabel = p.current_price
         ? ' (spot $' + p.current_price.toFixed(2) + ')' : '';
-    return '<tr title="tag=' + esc(tag) + spotLabel + '">' +
+    return '<tr style="cursor:pointer" data-tag="' + esc(tag) +
+           '" onclick="toggleTrackedExpand(\'' + esc(tag) +
+           '\', event)" title="Click to expand payoff diagram. tag=' +
+           esc(tag) + spotLabel + '">' +
       '<td>' + esc(p.symbol || '--') + '</td>' +
       '<td>' + strikeLadderSvg(p) + '</td>' +
       '<td>' + esc(p.expiration || '--') + '</td>' +
@@ -1102,7 +1108,7 @@ function renderTracked(tracked) {
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +
       '<td style="font-size:11px">' + bufferStr + '</td>' +
       '<td style="font-size:10px;color:var(--dim);font-family:var(--font)">' + esc(tagShort) + '</td>' +
-      '<td>' +
+      '<td onclick="event.stopPropagation()">' +
         '<button class="btn btn-sm btn-red" onclick="closeTracked(\'' + esc(tag) + '\')" title="Submit a close order to the broker">Close</button> ' +
         '<button class="btn btn-sm" onclick="forgetTracked(\'' + esc(tag) + '\')" title="Drop from tracker without touching the broker">Forget</button>' +
       '</td>' +
@@ -1114,6 +1120,245 @@ function renderTracked(tracked) {
       '<td colspan="5" style="color:var(--dim);font-size:11px">' +
       tracked.length + ' tracker entries, ' + totalContracts + ' total contracts</td>' +
       '<td colspan="7"></td></tr>';
+  }
+}
+
+// ---- Payoff diagram (click-to-expand) ----
+function toggleTrackedExpand(tag, ev) {
+  if (ev) ev.stopPropagation();
+  // Toggle: if a detail row already exists for this tag, remove it.
+  var existing = document.querySelector(
+    '#tracked-body tr.tracked-detail[data-tag="' + cssEsc(tag) + '"]');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  // Find the parent row and insert the detail row after it.
+  var rows = document.querySelectorAll('#tracked-body tr');
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row.dataset && row.dataset.tag === tag) {
+      var detail = document.createElement('tr');
+      detail.className = 'tracked-detail fade-in';
+      detail.dataset.tag = tag;
+      var cellHtml = '<td colspan="12" style="padding:12px 16px;' +
+        'background:rgba(30,45,74,0.15)">' +
+        '<div id="payoff-host-' + cssEsc(tag) + '"></div>' +
+        '</td>';
+      detail.innerHTML = cellHtml;
+      row.parentNode.insertBefore(detail, row.nextSibling);
+      var p = (window._lastTracked || []).find(function(x) {
+        return x.tag === tag;
+      });
+      if (p) {
+        renderPayoffPanel(detail.querySelector(
+          '#payoff-host-' + cssEsc(tag)), p);
+      }
+      return;
+    }
+  }
+}
+
+function cssEsc(s) {
+  // Minimal CSS attribute selector escape -- we know our tags are
+  // alphanumeric + hyphen so this is enough.
+  return (s || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function renderPayoffPanel(host, p) {
+  var entry = p.entry_credit_mid != null ? p.entry_credit_mid : p.entry_credit;
+  var contracts = p.contracts || 1;
+  var maxProfitDollar = entry * 100 * contracts;
+  var wing = Math.max(p.short_put_strike - p.long_put_strike,
+                       p.long_call_strike - p.short_call_strike);
+  var maxLossDollar = -(wing - entry) * 100 * contracts;
+  var beLow = p.short_put_strike - entry;
+  var beHigh = p.short_call_strike + entry;
+  var deltaUnderlying = (p.entry_underlying_price && p.current_price)
+      ? (p.current_price - p.entry_underlying_price) : null;
+  var deltaPct = (p.entry_underlying_price && p.current_price)
+      ? (deltaUnderlying / p.entry_underlying_price * 100) : null;
+  var summary =
+    '<div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12px;' +
+    'margin-bottom:8px">' +
+      '<div><span style="color:var(--dim)">Max profit:</span> ' +
+        '<span style="color:var(--green);font-weight:600">$' +
+        maxProfitDollar.toFixed(2) + '</span></div>' +
+      '<div><span style="color:var(--dim)">Max loss:</span> ' +
+        '<span style="color:var(--red);font-weight:600">$' +
+        maxLossDollar.toFixed(2) + '</span></div>' +
+      '<div><span style="color:var(--dim)">Breakevens:</span> ' +
+        '$' + beLow.toFixed(2) + ' / $' + beHigh.toFixed(2) + '</div>' +
+      (p.entry_underlying_price
+        ? '<div><span style="color:var(--dim)">Entry spot:</span> ' +
+          '<span style="color:var(--purple)">$' +
+          p.entry_underlying_price.toFixed(2) + '</span></div>'
+        : '<div style="color:var(--dim)">Entry spot: unknown ' +
+          '(adopted/legacy)</div>') +
+      (p.current_price
+        ? '<div><span style="color:var(--dim)">Now spot:</span> ' +
+          '<span style="color:var(--cyan)">$' +
+          p.current_price.toFixed(2) + '</span></div>'
+        : '') +
+      (deltaUnderlying != null
+        ? '<div><span style="color:var(--dim)">Move since entry:</span> ' +
+          '<span style="color:' +
+          (Math.abs(deltaPct) < 1 ? 'var(--green)' :
+           Math.abs(deltaPct) < 3 ? 'var(--yellow)' : 'var(--red)') +
+          '">' + (deltaUnderlying >= 0 ? '+' : '') +
+          '$' + deltaUnderlying.toFixed(2) +
+          ' (' + (deltaPct >= 0 ? '+' : '') + deltaPct.toFixed(2) +
+          '%)</span></div>'
+        : '') +
+    '</div>';
+  var canvasHtml = '<canvas style="width:100%;height:240px;display:block;' +
+    'background:#0a0e17;border:1px solid var(--border);' +
+    'border-radius:4px"></canvas>';
+  host.innerHTML = summary + canvasHtml;
+  var canvas = host.querySelector('canvas');
+  // Wait one tick so the canvas has its layout dimensions
+  setTimeout(function() { renderPayoffCanvas(canvas, p); }, 0);
+}
+
+function renderPayoffCanvas(canvas, p) {
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var w = canvas.clientWidth || 600;
+  var h = canvas.clientHeight || 240;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+
+  var lp = p.long_put_strike;
+  var sp = p.short_put_strike;
+  var sc = p.short_call_strike;
+  var lc = p.long_call_strike;
+  var entry = p.entry_credit_mid != null ? p.entry_credit_mid : p.entry_credit;
+  var contracts = p.contracts || 1;
+  var cur = p.current_price;
+  var entryU = p.entry_underlying_price;
+
+  // Strike-relative range with padding; expand to cover both prices
+  var pad = (lc - lp) * 0.4;
+  var xMin = lp - pad, xMax = lc + pad;
+  if (cur != null) { xMin = Math.min(xMin, cur); xMax = Math.max(xMax, cur); }
+  if (entryU != null) { xMin = Math.min(xMin, entryU); xMax = Math.max(xMax, entryU); }
+
+  var maxProfit = entry * 100 * contracts;
+  var wing = Math.max(sp - lp, lc - sc);
+  var maxLoss = -(wing - entry) * 100 * contracts;
+  var yPad = (maxProfit - maxLoss) * 0.20;
+  var yMin = maxLoss - yPad, yMax = maxProfit + yPad;
+
+  function pnlAtExp(S) {
+    var v = entry;
+    v -= Math.max(0, sp - S);
+    v += Math.max(0, lp - S);
+    v -= Math.max(0, S - sc);
+    v += Math.max(0, S - lc);
+    return v * 100 * contracts;
+  }
+  function xC(x) { return ((x - xMin) / (xMax - xMin)) * w; }
+  function yC(y) { return h - ((y - yMin) / (yMax - yMin)) * h; }
+
+  // Background
+  ctx.fillStyle = '#0a0e17';
+  ctx.fillRect(0, 0, w, h);
+
+  // Zero line (dashed dim)
+  if (yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = '#1e2d4a';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, yC(0)); ctx.lineTo(w, yC(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Strike vertical guides
+  ctx.strokeStyle = 'rgba(122,139,168,0.25)';
+  ctx.lineWidth = 1;
+  [lp, sp, sc, lc].forEach(function(s) {
+    ctx.beginPath();
+    ctx.moveTo(xC(s), 0); ctx.lineTo(xC(s), h); ctx.stroke();
+  });
+  // Strike labels at top
+  ctx.fillStyle = '#7a8ba8';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('LP ' + lp, xC(lp), 12);
+  ctx.fillText('SP ' + sp, xC(sp), 12);
+  ctx.fillText('SC ' + sc, xC(sc), 12);
+  ctx.fillText('LC ' + lc, xC(lc), 12);
+
+  // Payoff curve
+  ctx.strokeStyle = '#06b6d4';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (var i = 0; i <= w; i++) {
+    var price = xMin + (i / w) * (xMax - xMin);
+    var py = yC(pnlAtExp(price));
+    if (i === 0) ctx.moveTo(i, py);
+    else ctx.lineTo(i, py);
+  }
+  ctx.stroke();
+
+  // Entry underlying marker (purple dashed)
+  if (entryU != null) {
+    var ex = xC(entryU);
+    ctx.strokeStyle = '#a855f7';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(ex, 16); ctx.lineTo(ex, h); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#a855f7';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('entry $' + entryU.toFixed(2), ex + 4, 26);
+  }
+
+  // Current underlying marker (cyan solid)
+  if (cur != null) {
+    var cx = xC(cur);
+    ctx.strokeStyle = '#06b6d4';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, 16); ctx.lineTo(cx, h); ctx.stroke();
+    ctx.fillStyle = '#06b6d4';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('now $' + cur.toFixed(2), cx - 4, h - 24);
+  }
+
+  // Current unrealized P&L marker (filled circle on the chart at
+  // (current_price, current_pnl) -- shows where you ARE now, vs
+  // where the curve will be at expiration).
+  if (cur != null && p.pnl_dollars != null) {
+    var px = xC(cur);
+    var py = yC(p.pnl_dollars);
+    ctx.fillStyle = p.pnl_dollars >= 0 ? '#22c55e' : '#ef4444';
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#0a0e17';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = p.pnl_dollars >= 0 ? '#22c55e' : '#ef4444';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText((p.pnl_dollars >= 0 ? '+$' : '-$') +
+                  Math.abs(p.pnl_dollars).toFixed(0) + ' now',
+                  px + 8, py + 4);
+  }
+
+  // Y-axis labels (max profit, max loss, zero)
+  ctx.fillStyle = '#7a8ba8';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('+$' + maxProfit.toFixed(0), 4, yC(maxProfit) + 11);
+  ctx.fillText('-$' + Math.abs(maxLoss).toFixed(0), 4, yC(maxLoss) - 4);
+  if (yMin < 0 && yMax > 0) {
+    ctx.fillText('$0', 4, yC(0) - 3);
   }
 }
 

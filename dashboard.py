@@ -323,10 +323,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         debit, _ = compute_close_debit_mid(_trader, t)
                     except Exception:
                         debit = None
-                    if debit is not None and t.entry_credit > 0:
-                        pnl_dollars = (t.entry_credit - debit) * 100 * t.contracts
-                        pnl_pct = ((t.entry_credit - debit)
-                                   / t.entry_credit) * 100
+                    # Use mid-vs-mid for fair P&L. entry_credit_mid was
+                    # captured at strategy time using the same midpoint
+                    # convention as compute_close_debit_mid, so the
+                    # display shows true economic P&L without a
+                    # half-spread bias on either side.
+                    entry_for_pnl = getattr(t, "entry_credit_mid",
+                                            t.entry_credit)
+                    if debit is not None and entry_for_pnl > 0:
+                        pnl_dollars = (entry_for_pnl - debit) * 100 * t.contracts
+                        pnl_pct = ((entry_for_pnl - debit)
+                                   / entry_for_pnl) * 100
                     tracked_info.append({
                         "tag": t.tag,
                         "symbol": t.symbol,
@@ -334,6 +341,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "dte": t.current_dte(),
                         "contracts": t.contracts,
                         "entry_credit": t.entry_credit,
+                        "entry_credit_mid": entry_for_pnl,
                         "current_debit": debit,  # midpoint
                         "pnl_dollars": pnl_dollars,
                         "pnl_pct": pnl_pct,

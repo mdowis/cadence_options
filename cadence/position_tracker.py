@@ -34,7 +34,7 @@ class TrackedPosition:
 
     __slots__ = (
         "tag", "symbol", "expiration", "dte_at_entry", "contracts",
-        "entry_credit", "entry_time",
+        "entry_credit", "entry_credit_mid", "entry_time",
         "short_put_symbol", "long_put_symbol",
         "short_call_symbol", "long_call_symbol",
         "short_put_strike", "long_put_strike",
@@ -46,13 +46,21 @@ class TrackedPosition:
                  short_put_symbol, long_put_symbol,
                  short_call_symbol, long_call_symbol,
                  short_put_strike, long_put_strike,
-                 short_call_strike, long_call_strike):
+                 short_call_strike, long_call_strike,
+                 entry_credit_mid=None):
         self.tag = tag
         self.symbol = symbol
         self.expiration = expiration
         self.dte_at_entry = dte_at_entry
         self.contracts = contracts
         self.entry_credit = entry_credit          # per-share (e.g., 2.40)
+        # Midpoint entry credit -- fair-value mark used for unrealized
+        # P&L. Falls back to entry_credit when not available so older
+        # tracker rows (loaded from JSON before this field existed)
+        # still work.
+        self.entry_credit_mid = (entry_credit_mid
+                                 if entry_credit_mid is not None
+                                 else entry_credit)
         self.entry_time = entry_time              # unix ts
         self.short_put_symbol = short_put_symbol
         self.long_put_symbol = long_put_symbol
@@ -126,6 +134,9 @@ class PositionTracker:
         """Record a new iron condor position we just opened."""
         if entry_time is None:
             entry_time = time.time()
+        # Capture midpoint credit for fair-mark P&L. Older candidates
+        # without credit_mid attribute fall back to credit.
+        credit_mid = getattr(candidate, "credit_mid", candidate.credit)
         pos = TrackedPosition(
             tag=tag,
             symbol=candidate.symbol,
@@ -133,6 +144,7 @@ class PositionTracker:
             dte_at_entry=candidate.dte,
             contracts=contracts,
             entry_credit=candidate.credit,
+            entry_credit_mid=credit_mid,
             entry_time=entry_time,
             short_put_symbol=candidate.short_put_symbol,
             long_put_symbol=candidate.long_put_symbol,

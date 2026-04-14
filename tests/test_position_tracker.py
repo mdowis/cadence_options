@@ -28,6 +28,7 @@ class FakeCandidate:
         self.long_call_symbol = "SPY260530C00475000"
         self.long_call_strike = 475
         self.credit = 2.40
+        self.credit_mid = 2.65  # mid is more favorable than conservative
 
 
 class TestTrackedPosition(unittest.TestCase):
@@ -83,6 +84,15 @@ class TestPositionTracker(unittest.TestCase):
         self.assertEqual(len(open_pos), 1)
         self.assertEqual(open_pos[0].tag, "t1")
         self.assertEqual(open_pos[0].entry_credit, 2.40)
+        # Midpoint credit captured for fair-mark P&L
+        self.assertEqual(open_pos[0].entry_credit_mid, 2.65)
+
+    def test_record_entry_falls_back_when_no_mid(self):
+        """Old candidates without credit_mid attribute fall back to credit."""
+        c = FakeCandidate()
+        del c.credit_mid
+        self.tracker.record_entry(c, tag="t1", contracts=1)
+        self.assertEqual(self.tracker.get_open()[0].entry_credit_mid, 2.40)
 
     def test_persistence(self):
         c = FakeCandidate()

@@ -33,7 +33,8 @@ class IronCondorCandidate:
                  credit, max_loss,
                  breakeven_low, breakeven_high,
                  put_delta, call_delta,
-                 prob_profit, return_pct):
+                 prob_profit, return_pct,
+                 credit_mid=None):
         self.symbol = symbol
         self.expiration = expiration
         self.dte = dte
@@ -46,7 +47,11 @@ class IronCondorCandidate:
         self.short_call_strike = short_call_strike
         self.long_call_symbol = long_call_symbol
         self.long_call_strike = long_call_strike
-        self.credit = credit  # per-share credit
+        self.credit = credit  # per-share credit (conservative bid-side)
+        # Midpoint credit -- the fair-value entry mark. Used for
+        # unrealized P&L display so we don't subtract a bid-side entry
+        # from a midpoint close (which always shows phantom losses).
+        self.credit_mid = credit_mid if credit_mid is not None else credit
         self.max_loss = max_loss  # per-share max loss
         self.breakeven_low = breakeven_low
         self.breakeven_high = breakeven_high
@@ -224,11 +229,25 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
     long_put_ask = long_put.get("ask", 0) or 0
     long_call_ask = long_call.get("ask", 0) or 0
 
+    # Conservative (cross-the-spread) credit: what we're guaranteed to
+    # collect if we hit the bid for shorts and the ask for longs.
+    # Used for risk checks and the actual order limit price.
     credit = short_put_bid + short_call_bid - long_put_ask - long_call_ask
 
     if credit <= 0:
         logger.info("%s: negative credit %.2f", symbol, credit)
         return []
+
+    # Midpoint credit: fair-value entry mark. Used for unrealized
+    # P&L display so the dashboard isn't biased by entry spread cost.
+    def _mid(opt, key_a="bid", key_b="ask"):
+        a = opt.get(key_a, 0) or 0
+        b = opt.get(key_b, 0) or 0
+        if a > 0 and b > 0:
+            return (a + b) / 2.0
+        return a or b or 0
+    credit_mid = (_mid(short_put) + _mid(short_call)
+                  - _mid(long_put) - _mid(long_call))
 
     # 9. Max loss = effective wing width - credit (per share)
     max_loss = effective_wing_width - credit
@@ -277,6 +296,7 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
         long_call_symbol=long_call.get("symbol", ""),
         long_call_strike=long_call_strike,
         credit=credit,
+        credit_mid=credit_mid,
         max_loss=max_loss,
         breakeven_low=breakeven_low,
         breakeven_high=breakeven_high,

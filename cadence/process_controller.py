@@ -461,6 +461,13 @@ class ProcessController:
             # linger after all positions close.
             self.risk_mgr.update_greeks(0, 0, 0, 0)
 
+        # Drop phantom tracker entries (orders that were placed but
+        # never filled). This catches phantoms that share legs with
+        # real positions -- detect_closes can't see those because the
+        # leg symbols still appear at the broker from the real fill.
+        if self.position_tracker is not None:
+            self._cleanup_phantoms()
+
         # Detect closed positions (tracked locally but missing from broker),
         # compute realized P&L, record them for daily P&L / Kelly stats.
         if self.position_tracker is not None and positions is not None:
@@ -471,6 +478,39 @@ class ProcessController:
         # stop / loss stop.
         if self.position_manager is not None and self.position_tracker is not None:
             self._check_and_submit_exits()
+
+    # Grace period: don't drop a fresh entry as a phantom -- give the
+    # broker time to actually fill it. After this many seconds we ask
+    # Tradier whether the entry order ever filled.
+    PHANTOM_GRACE_SECS = 300
+
+    def _cleanup_phantoms(self):
+        """For each tracked entry older than PHANTOM_GRACE_SECS, ask
+        Tradier whether the entry order was ever filled. Drop entries
+        with no filled order on record.
+
+        Catches the case where N phantoms share legs with a real IC,
+        which detect_closes can't handle (it only fires when ALL legs
+        are missing from broker positions, but the real IC's legs are
+        present)."""
+        now = time.time()
+        for tracked in self.position_tracker.get_open():
+            age = now - (tracked.entry_time or now)
+            if age < self.PHANTOM_GRACE_SECS:
+                continue
+            try:
+                filled = self.position_tracker.position_was_filled(
+                    tracked, self.trader)
+            except Exception as e:
+                logger.warning("Phantom check for %s raised: %s",
+                               tracked.tag, e)
+                continue
+            if not filled:
+                logger.info(
+                    "Tracker: dropping phantom tag=%s symbol=%s "
+                    "(age=%.0fs, no filled order at broker)",
+                    tracked.tag, tracked.symbol, age)
+                self.position_tracker.remove(tracked.tag)
 
     def _detect_and_record_closes(self, broker_positions):
         """For any tracked position whose legs no longer appear at the

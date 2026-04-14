@@ -336,6 +336,80 @@ class TestAutoExitLoop(unittest.TestCase):
         self.pc._check_and_submit_exits()
 
 
+class TestPhantomCleanup(unittest.TestCase):
+    """Phantoms whose legs overlap with real positions can't be caught
+    by detect_closes (which needs ALL legs missing). The cleanup pass
+    catches them by checking the orders endpoint directly."""
+
+    def setUp(self):
+        from cadence.position_manager import PositionManager
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=1000000)
+        self.tracker = PositionTracker(state_file=None)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=False, scan_interval=60,
+            position_manager=PositionManager(),
+            position_tracker=self.tracker,
+        )
+        c = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=2.40, max_loss=7.60,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+        old_time = time.time() - (self.pc.PHANTOM_GRACE_SECS + 60)
+        self.tracker.record_entry(c, tag="t-real", contracts=1,
+                                   entry_time=old_time)
+        self.tracker.record_entry(c, tag="t-phantom", contracts=1,
+                                   entry_time=old_time)
+
+    def test_phantom_with_overlapping_legs_gets_dropped(self):
+        """t-real has filled order, t-phantom does not. Even though
+        their legs are identical and visible at Tradier (because t-real
+        really opened), t-phantom should still be dropped."""
+        self.trader.get_orders.return_value = [
+            {"tag": "t-real", "status": "filled"},
+            {"tag": "t-phantom", "status": "open"},
+        ]
+        self.assertEqual(len(self.tracker.get_open()), 2)
+        self.pc._cleanup_phantoms()
+        remaining = [t.tag for t in self.tracker.get_open()]
+        self.assertEqual(remaining, ["t-real"])
+
+    def test_fresh_phantom_not_dropped(self):
+        """Entries within PHANTOM_GRACE_SECS are not eligible for
+        cleanup -- the broker may not have processed the order yet."""
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.tracker = PositionTracker(state_file=None)
+        self.pc.position_tracker = self.tracker
+        c = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=2.40, max_loss=7.60,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+        self.tracker.record_entry(c, tag="t-fresh", contracts=1,
+                                   entry_time=time.time())
+        self.trader.get_orders.return_value = []
+        self.pc._cleanup_phantoms()
+        self.assertEqual([t.tag for t in self.tracker.get_open()], ["t-fresh"])
+        self.trader.get_orders.assert_not_called()
+
+
 class TestSpuriousCloseDetection(unittest.TestCase):
     """Phantom 'closes' for entries that never filled must NOT record
     trades. Otherwise daily trade_count and Kelly's sample_size get

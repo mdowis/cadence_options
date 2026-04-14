@@ -226,6 +226,16 @@ class TestFindIronCondorCandidates(unittest.TestCase):
         # Max loss = 10 - 2.60 = 7.40
         self.assertAlmostEqual(c.max_loss, 7.40, places=2)
         self.assertGreater(c.return_pct, 0)
+        # credit_mid uses midpoints:
+        # mid(short put) = (2.50+2.70)/2 = 2.60
+        # mid(short call) = (2.50+2.70)/2 = 2.60
+        # mid(long put) = (1.10+1.20)/2 = 1.15
+        # mid(long call) = (1.10+1.20)/2 = 1.15
+        # credit_mid = 2.60 + 2.60 - 1.15 - 1.15 = 2.90
+        self.assertAlmostEqual(c.credit_mid, 2.90, places=2)
+        # Mid credit must be >= conservative credit (we'd collect more
+        # at midpoint than at the bid-ask boundary).
+        self.assertGreaterEqual(c.credit_mid, c.credit)
 
     def test_iv_rank_too_low(self):
         candidates = find_iron_condor_candidates(

@@ -328,7 +328,11 @@ that share legs at the broker.">Open Iron Condors (tracker)</div>
           <th>Ticker</th><th>Exp</th><th>DTE</th>
           <th>Put Spread</th><th>Call Spread</th>
           <th>Qty</th>
-          <th>Entry</th><th>Mid</th><th>P&amp;L</th>
+          <th title="Credit at entry, at midpoint. Pre-upgrade entries
+show the conservative (bid-side) value -- flagged with *.">Entry</th>
+          <th title="Current cost to close, at midpoint. This is what
+you'd pay to buy back the position at fair value right now.">Current</th>
+          <th title="(Entry - Current) x contracts x 100">P&amp;L</th>
           <th>P&amp;L%</th><th>Tag</th><th></th>
         </tr>
       </thead>
@@ -905,6 +909,22 @@ function renderTracked(tracked) {
     var pnlStr = pnl == null ? '--' : '$' + pnl.toFixed(2);
     var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
     var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
+    // Show entry_credit_mid so Entry - Current = P&L visually (both
+    // are midpoint-based). Flag with * if this row predates the
+    // credit_mid fix -- those fall back to the conservative entry
+    // value and will show a small phantom loss until closed + reopened.
+    var entryMid = p.entry_credit_mid;
+    var entryBid = p.entry_credit;
+    var entryShown = entryMid != null ? entryMid : entryBid;
+    var legacyFlag = (entryMid != null && entryBid != null
+                      && Math.abs(entryMid - entryBid) < 0.001) ? '*' : '';
+    var entryStr = entryShown != null
+        ? ('$' + entryShown.toFixed(2) + legacyFlag) : '--';
+    var entryTitle = legacyFlag
+        ? 'Pre-upgrade entry: stored at conservative bid-side value. '
+          + 'P&L may show phantom loss until this position is closed '
+          + 'and a new one opens with midpoint entry tracking.'
+        : 'Midpoint entry credit';
     var tag = p.tag || '';
     var tagShort = tag.length > 14 ? tag.substring(0, 14) + '..' : tag;
     return '<tr title="tag=' + esc(tag) + '">' +
@@ -914,7 +934,7 @@ function renderTracked(tracked) {
       '<td>' + (p.long_put_strike || '--') + '/' + (p.short_put_strike || '--') + '</td>' +
       '<td>' + (p.short_call_strike || '--') + '/' + (p.long_call_strike || '--') + '</td>' +
       '<td>' + (p.contracts || 1) + '</td>' +
-      '<td>$' + (p.entry_credit != null ? p.entry_credit.toFixed(2) : '--') + '</td>' +
+      '<td title="' + esc(entryTitle) + '">' + entryStr + '</td>' +
       '<td>' + currentStr + '</td>' +
       '<td style="color:' + pnlColor + ';font-weight:600">' + pnlStr + '</td>' +
       '<td style="color:' + pnlColor + '">' + pnlPctStr + '</td>' +

@@ -240,14 +240,12 @@ def find_iron_condor_candidates(trader, symbol, config, iv_rank, today=None):
 
     # Midpoint credit: fair-value entry mark. Used for unrealized
     # P&L display so the dashboard isn't biased by entry spread cost.
-    def _mid(opt, key_a="bid", key_b="ask"):
-        a = opt.get(key_a, 0) or 0
-        b = opt.get(key_b, 0) or 0
-        if a > 0 and b > 0:
-            return (a + b) / 2.0
-        return a or b or 0
-    credit_mid = (_mid(short_put) + _mid(short_call)
-                  - _mid(long_put) - _mid(long_call))
+    # Uses the same _opt_mid function as the close-debit calculation
+    # so credit_mid at T0 and close_debit_mid at T1 with the same
+    # chain give equal values (P&L = 0 when nothing has moved).
+    from cadence.executor import _opt_mid
+    credit_mid = (_opt_mid(short_put) + _opt_mid(short_call)
+                  - _opt_mid(long_put) - _opt_mid(long_call))
 
     # 9. Max loss = effective wing width - credit (per share)
     max_loss = effective_wing_width - credit

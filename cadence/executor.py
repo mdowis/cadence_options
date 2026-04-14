@@ -78,13 +78,25 @@ def _legs_from_chain(trader, tracked):
 
 
 def _opt_mid(opt):
-    """Midpoint of an option's bid/ask. Falls back to last/mark if
-    bid or ask is missing."""
+    """Midpoint of an option's bid/ask.
+
+    Fallback order (matches strategy._mid for consistency):
+      1. (bid + ask) / 2 when both > 0
+      2. bid or ask when only one side is populated
+      3. last, mark, or close as a last resort
+    """
+    if opt is None:
+        return 0.0
     bid = _safe_float(opt.get("bid"))
     ask = _safe_float(opt.get("ask"))
     if bid > 0 and ask > 0:
         return (bid + ask) / 2.0
-    # Fall back to last or mark when bid/ask is incomplete
+    # One-sided: use whichever is present
+    if bid > 0:
+        return bid
+    if ask > 0:
+        return ask
+    # Last resort: fall back to last/mark/close
     for k in ("last", "mark", "close"):
         v = _safe_float(opt.get(k))
         if v > 0:

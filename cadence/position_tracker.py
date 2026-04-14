@@ -228,6 +228,12 @@ class PositionTracker:
         Ground-truth entry credit -- what Tradier actually gave us,
         not our pre-fill midpoint estimate. Use this for unrealized
         P&L display whenever available.
+
+        Matching strategy (most to least precise):
+          1. Exact tag + filled + credit order
+          2. Exact tag + filled (any type)
+          3. Filled multileg order whose legs match ours 1-to-1
+          4. None (fall back to midpoint estimate)
         """
         try:
             orders = trader.get_orders()
@@ -235,25 +241,75 @@ class PositionTracker:
             logger.warning("get_entry_fill_price: get_orders failed: %s", e)
             return None
 
-        # Entry order = credit order (type='credit') that filled.
-        # Debit orders with the same tag are close orders -- skip.
-        # We only ever submit one credit order per tag, so we can
-        # return the first match.
-        for o in orders:
-            if o.get("tag") != tracked.tag:
-                continue
+        if not orders:
+            logger.info("get_entry_fill_price: no orders returned for tag=%s",
+                        tracked.tag)
+            return None
+
+        # Pass 1: exact tag + filled + credit type
+        tagged = [o for o in orders if o.get("tag") == tracked.tag]
+        for o in tagged:
             status = (o.get("status") or "").lower()
             if status != "filled":
                 continue
             order_type = (o.get("type") or "").lower()
             if order_type == "debit":
                 continue
-            try:
-                val = float(o.get("avg_fill_price") or o.get("price") or 0)
-                if val > 0:
-                    return val
-            except (TypeError, ValueError):
+            price = _order_fill_price(o)
+            if price is not None:
+                return price
+
+        # Pass 2: exact tag + filled + UNKNOWN type (Tradier sandbox
+        # sometimes omits the 'type' field). Still explicitly skip
+        # known debit (close) orders to avoid returning a close price
+        # as an entry.
+        for o in tagged:
+            status = (o.get("status") or "").lower()
+            if status != "filled":
                 continue
+            order_type = (o.get("type") or "").lower()
+            if order_type == "debit":
+                continue  # known close -- skip
+            if order_type:
+                continue  # known non-credit -- pass 1 already handled credit
+            # type is empty/unknown
+            price = _order_fill_price(o)
+            if price is not None:
+                logger.info("Entry matched by tag with no type field: %s",
+                            tracked.tag)
+                return price
+
+        # Pass 3: match by legs. Find a filled multileg order whose
+        # four legs match ours exactly. Useful when tags got stripped
+        # in transit or the sandbox mutated them.
+        want = set(tracked.leg_symbols())
+        for o in orders:
+            status = (o.get("status") or "").lower()
+            if status != "filled":
+                continue
+            order_legs = o.get("leg") or o.get("legs") or []
+            if isinstance(order_legs, dict):
+                order_legs = [order_legs]
+            got = set()
+            for leg in order_legs:
+                sym = leg.get("option_symbol") or leg.get("symbol")
+                if sym:
+                    got.add(sym)
+            if got == want:
+                order_type = (o.get("type") or "").lower()
+                if order_type == "debit":
+                    continue
+                price = _order_fill_price(o)
+                if price is not None:
+                    logger.info("Entry matched by legs (tag mismatch): "
+                                "tracker_tag=%s order_tag=%s",
+                                tracked.tag, o.get("tag"))
+                    return price
+
+        # Diagnostic: log what's blocking us
+        logger.info("get_entry_fill_price: no match for tag=%s. "
+                    "Orders with matching tag: %d. Total orders: %d.",
+                    tracked.tag, len(tagged), len(orders))
         return None
 
     # -- P&L computation ---------------------------------------------------
@@ -327,6 +383,25 @@ class PositionTracker:
                   f"close_debit=${close_debit:.2f}, P&L=${pnl_cents/100:.2f}, "
                   f"tag={tracked.tag}")
         return pnl_cents, detail
+
+
+def _order_fill_price(order):
+    """Extract a usable fill price from a Tradier order dict.
+
+    Tradier orders may report avg_fill_price, price (limit), or
+    last_fill_price. Pick the first positive value found.
+    """
+    for key in ("avg_fill_price", "last_fill_price", "price"):
+        v = order.get(key)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+            if f > 0:
+                return f
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _order_created_after(order, ts):

@@ -225,8 +225,11 @@ tr:hover td { background: rgba(59,130,246,0.03); }
     <div class="stat-value" id="s-equity">--</div>
     <div class="stat-sub" id="s-equity-sub">--</div>
   </div>
-  <div class="stat-card" style="border-top-color:var(--green)">
-    <div class="stat-label">Daily P&amp;L</div>
+  <div class="stat-card" style="border-top-color:var(--green)"
+       title="Total = realized closes today + unrealized mark on open positions.
+The two are different things: realized only changes when a trade closes;
+unrealized changes every sync as option prices move.">
+    <div class="stat-label">Daily P&amp;L (total)</div>
     <div class="stat-value" id="s-pnl">--</div>
     <div class="stat-sub" id="s-pnl-sub">--</div>
   </div>
@@ -1131,12 +1134,24 @@ async function doRefresh() {
     el('s-equity-sub').textContent = syncAge < 60 ? 'LIVE' : 'STALE (' + Math.floor(syncAge) + 's ago)';
     el('s-equity-sub').style.color = syncAge < 60 ? 'var(--green)' : 'var(--yellow)';
 
-    var pnl = daily.pnl_cents || 0;
-    el('s-pnl').textContent = fmt$(pnl);
-    el('s-pnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-    var dsb = daily.starting_balance_cents || 0;
-    var pnlPct = dsb > 0 ? (pnl / dsb * 100).toFixed(2) : '0.00';
-    el('s-pnl-sub').textContent = pnlPct + '% of daily start';
+    // Daily P&L = realized (from closed trades) + unrealized (mark on
+    // open tracker positions). Show both so the operator can see why
+    // the total moves between syncs even with no trades closing.
+    var realizedCents = daily.pnl_cents || 0;
+    var unrealizedCents = 0;
+    if (tracked && tracked.tracked) {
+      for (var i = 0; i < tracked.tracked.length; i++) {
+        var p = tracked.tracked[i];
+        if (p.pnl_dollars != null) {
+          unrealizedCents += Math.round(p.pnl_dollars * 100);
+        }
+      }
+    }
+    var totalCents = realizedCents + unrealizedCents;
+    el('s-pnl').textContent = fmt$(totalCents);
+    el('s-pnl').style.color = totalCents >= 0 ? 'var(--green)' : 'var(--red)';
+    el('s-pnl-sub').textContent = 'realized ' + fmt$(realizedCents) +
+                                   ' + unrealized ' + fmt$(unrealizedCents);
 
     var ddPct = dd.current_pct || 0;
     el('s-dd').textContent = fmtPct(ddPct, 1);

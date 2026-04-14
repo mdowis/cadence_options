@@ -284,6 +284,10 @@ Multiple ICs sharing the same legs are aggregated by Tradier.">
         <button class="btn btn-sm btn-blue" onclick="doTestFetch()">Run Test Fetch</button>
         <span id="test-fetch-result" style="font-size:11px;color:var(--dim);margin-left:8px"></span>
       </div>
+      <div style="padding:4px 0">
+        <button class="btn btn-sm btn-blue" onclick="doReconcile()" title="Rebuild the tracker from Tradier's filled credit multileg order history. Adopts untracked broker positions and drops tracker entries with no matching broker legs.">Reconcile tracker with broker</button>
+        <span id="reconcile-result" style="font-size:11px;color:var(--dim);margin-left:8px"></span>
+      </div>
     </div>
 
     <!-- Scanner row -->
@@ -663,6 +667,29 @@ function confirmLive2() {
   cancelConfirm();
   // Production requires the explicit confirm header on the server too
   setDryRun(false, {'X-Cadence-Confirm-Live': 'CONFIRM-PRODUCTION-LIVE'});
+}
+
+async function doReconcile() {
+  var out = el('reconcile-result');
+  out.textContent = 'Reconciling...';
+  out.style.color = 'var(--dim)';
+  var r = await api('POST', '/api/reconcile');
+  if (r && r._error) {
+    out.textContent = 'Error: HTTP ' + r.status + ' ' + r.body;
+    out.style.color = 'var(--red)';
+    return;
+  }
+  if (r && r.error) {
+    out.textContent = r.error;
+    out.style.color = 'var(--red)';
+    return;
+  }
+  var msg = 'Adopted: ' + (r.adopted ? r.adopted.length : 0) +
+            ', dropped orphans: ' + (r.dropped_orphans ? r.dropped_orphans.length : 0) +
+            ', unmatched orders: ' + (r.skipped_no_match || 0);
+  out.textContent = msg;
+  out.style.color = 'var(--green)';
+  setTimeout(doRefresh, 500);
 }
 
 // ---- Test fetch ----

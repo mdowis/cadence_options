@@ -306,6 +306,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     }
             self._send_json(data)
 
+        elif path == "/api/state-summary":
+            # Unified diagnostic: broker vs tracker vs risk manager
+            # state. Shows counts AND a legs-diff so the operator
+            # can see exactly which broker legs are untracked and
+            # which tracker entries have no matching broker position.
+            self._send_json(_build_state_summary())
+
         elif path == "/api/orders":
             # Broker orders (pending + filled) so operator can see
             # close orders that haven't filled yet and are blocking
@@ -515,6 +522,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if _risk_mgr:
                 _risk_mgr.reset_daily()
             self._send_json({"status": "reset"})
+
+        elif path == "/api/reconcile":
+            # Bring the tracker back into parity with the broker.
+            # Walks Tradier's filled credit multileg orders, and for
+            # each one whose four legs are currently open at the
+            # broker AND aren't already in the tracker, adds a
+            # tracker entry using the order's avg_fill_price as the
+            # entry credit.
+            result = _reconcile_tracker_with_broker()
+            self._send_json(result)
 
         elif path.startswith("/api/orders/") and path.endswith("/cancel"):
             # Cancel a pending broker order by order_id. For stuck
@@ -737,6 +754,277 @@ def _cmd_exec_live(*args):
     if _process_ctrl:
         _process_ctrl.set_dry_run(False)
     return "LIVE TRADING ENABLED. Executor will place real orders."
+
+
+# -- State reconciliation ---------------------------------------------------
+
+def _build_state_summary():
+    """Snapshot of broker / tracker / risk-manager state plus a diff
+    so the operator can see where they've drifted out of sync."""
+    summary = {
+        "broker": {"legs": [], "leg_count": 0, "authenticated": False},
+        "tracker": {"entries": [], "count": 0},
+        "risk": {"daily_pnl_cents": 0, "daily_trade_count": 0,
+                 "equity_cents": 0, "position_count": 0},
+        "diff": {"untracked_broker_legs": [], "orphan_tracker_entries": []},
+    }
+    if _trader and _trader.authenticated:
+        summary["broker"]["authenticated"] = True
+        try:
+            positions = _trader.get_positions()
+            summary["broker"]["legs"] = [
+                {"symbol": p.get("symbol"),
+                 "quantity": p.get("quantity"),
+                 "cost_basis": p.get("cost_basis")}
+                for p in positions
+            ]
+            summary["broker"]["leg_count"] = len(positions)
+        except Exception as e:
+            summary["broker"]["error"] = str(e)
+    if _position_tracker:
+        tracked = _position_tracker.get_open()
+        summary["tracker"]["count"] = len(tracked)
+        summary["tracker"]["entries"] = [
+            {"tag": t.tag, "symbol": t.symbol,
+             "expiration": t.expiration, "contracts": t.contracts,
+             "legs": list(t.leg_symbols())}
+            for t in tracked
+        ]
+        # Compute diff
+        broker_symbols = {p["symbol"] for p in summary["broker"]["legs"]
+                          if p.get("symbol")}
+        tracker_symbols = set()
+        for t in tracked:
+            tracker_symbols.update(t.leg_symbols())
+        summary["diff"]["untracked_broker_legs"] = sorted(
+            broker_symbols - tracker_symbols)
+        summary["diff"]["orphan_tracker_legs"] = sorted(
+            tracker_symbols - broker_symbols)
+    if _risk_mgr:
+        r = _risk_mgr.get_status()
+        summary["risk"] = {
+            "daily_pnl_cents": r["daily"]["pnl_cents"],
+            "daily_trade_count": r["daily"]["trade_count"],
+            "equity_cents": r["equity"]["current"],
+            "position_count": r["positions"]["count"],
+            "position_leg_count": r["positions"].get("leg_count", 0),
+        }
+    return summary
+
+
+def _reconcile_tracker_with_broker():
+    """Rebuild the tracker from Tradier's filled credit multileg orders.
+
+    Algorithm:
+      1. Fetch current broker positions (set of open leg symbols).
+      2. Fetch all orders from Tradier.
+      3. For each filled credit multileg order:
+         - Extract its 4 leg symbols
+         - If all 4 are currently open at the broker AND we don't
+           already track this tag, create a tracker entry.
+      4. Optionally: drop tracker entries whose legs are no longer
+         in broker (orphans).
+
+    Returns a summary dict of what was done.
+    """
+    result = {
+        "adopted": [],
+        "dropped_orphans": [],
+        "skipped_no_match": 0,
+        "error": None,
+    }
+    if not _trader or not _trader.authenticated:
+        result["error"] = "broker not authenticated"
+        return result
+    if not _position_tracker:
+        result["error"] = "tracker not initialized"
+        return result
+
+    try:
+        positions = _trader.get_positions()
+        orders = _trader.get_orders()
+    except Exception as e:
+        result["error"] = f"broker fetch failed: {e}"
+        return result
+
+    broker_symbols = {p.get("symbol") for p in positions if p.get("symbol")}
+    existing_tags = {t.tag for t in _position_tracker.get_open()}
+
+    # Group existing tracker leg-sets by leg symbols so we can skip
+    # orders whose legs already match a tracker entry
+    existing_leg_sets = [set(t.leg_symbols())
+                         for t in _position_tracker.get_open()]
+
+    from cadence.greeks import _parse_occ_symbol
+    from cadence.strategy import IronCondorCandidate
+    from datetime import datetime
+
+    for o in orders:
+        status = (o.get("status") or "").lower()
+        if status != "filled":
+            continue
+        otype = (o.get("type") or "").lower()
+        if otype and otype != "credit":
+            continue  # only credit entries
+
+        order_legs_raw = o.get("leg") or o.get("legs") or []
+        if isinstance(order_legs_raw, dict):
+            order_legs_raw = [order_legs_raw]
+        leg_syms = []
+        for leg in order_legs_raw:
+            sym = leg.get("option_symbol") or leg.get("symbol")
+            if sym:
+                leg_syms.append(sym)
+
+        if len(leg_syms) != 4:
+            continue
+        leg_set = set(leg_syms)
+
+        # Skip if all legs aren't currently at broker
+        if not leg_set.issubset(broker_symbols):
+            result["skipped_no_match"] += 1
+            continue
+
+        # Skip if tracker already has these legs
+        if any(leg_set == s for s in existing_leg_sets):
+            continue
+
+        # Parse the legs to figure out which is short/long put/call
+        parsed_legs = []
+        underlying = None
+        expiration = None
+        for sym in leg_syms:
+            parsed = _parse_occ_symbol(sym)
+            if parsed is None:
+                break
+            root, exp, opt_type, strike = parsed
+            parsed_legs.append({"symbol": sym, "type": opt_type,
+                                 "strike": strike})
+            underlying = root
+            expiration = exp
+        if len(parsed_legs) != 4 or underlying is None:
+            continue
+
+        puts = sorted([l for l in parsed_legs if l["type"] == "put"],
+                      key=lambda l: l["strike"])
+        calls = sorted([l for l in parsed_legs if l["type"] == "call"],
+                       key=lambda l: l["strike"])
+        if len(puts) != 2 or len(calls) != 2:
+            continue
+
+        # Iron condor: lower put = long, upper put = short,
+        # lower call = short, upper call = long
+        long_put, short_put = puts
+        short_call, long_call = calls
+
+        # Verify by checking quantities at broker: shorts should be
+        # negative, longs positive
+        qty_by_sym = {}
+        for p in positions:
+            try:
+                qty_by_sym[p.get("symbol")] = float(p.get("quantity", 0))
+            except (TypeError, ValueError):
+                qty_by_sym[p.get("symbol")] = 0
+        if qty_by_sym.get(short_put["symbol"], 0) >= 0:
+            continue  # not actually short
+        if qty_by_sym.get(short_call["symbol"], 0) >= 0:
+            continue
+        if qty_by_sym.get(long_put["symbol"], 0) <= 0:
+            continue
+        if qty_by_sym.get(long_call["symbol"], 0) <= 0:
+            continue
+
+        # Contracts from the order or qty
+        contracts = 1
+        try:
+            contracts = abs(int(qty_by_sym.get(short_put["symbol"], 1)))
+            if contracts <= 0:
+                contracts = 1
+        except (TypeError, ValueError):
+            contracts = 1
+
+        entry_credit = _env_float_field(o, "avg_fill_price") or \
+                       _env_float_field(o, "price") or 0
+        if entry_credit <= 0:
+            # Can't determine entry credit -- skip
+            continue
+
+        # DTE at entry is today-diff from expiration; close enough
+        try:
+            exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+            from datetime import date
+            dte_at_entry = (exp_date - date.today()).days
+        except ValueError:
+            dte_at_entry = 0
+
+        # Use order's tag if present, else synthesize one
+        tag = o.get("tag") or f"adopted-{o.get('id', 'unknown')}"
+        if tag in existing_tags:
+            continue
+
+        # Parse create_date for entry_time
+        entry_time = None
+        create = o.get("create_date") or o.get("transaction_date")
+        if create:
+            try:
+                dt = datetime.strptime(create[:19], "%Y-%m-%dT%H:%M:%S")
+                entry_time = dt.timestamp()
+            except (ValueError, TypeError):
+                pass
+
+        # Synthesize a minimal IronCondorCandidate for record_entry
+        cand = IronCondorCandidate(
+            symbol=underlying,
+            expiration=expiration,
+            dte=dte_at_entry,
+            iv_rank=0,
+            short_put_symbol=short_put["symbol"],
+            short_put_strike=short_put["strike"],
+            long_put_symbol=long_put["symbol"],
+            long_put_strike=long_put["strike"],
+            short_call_symbol=short_call["symbol"],
+            short_call_strike=short_call["strike"],
+            long_call_symbol=long_call["symbol"],
+            long_call_strike=long_call["strike"],
+            credit=entry_credit,
+            credit_mid=entry_credit,  # we have the actual fill, it IS the mid
+            max_loss=max(short_put["strike"] - long_put["strike"],
+                          long_call["strike"] - short_call["strike"]) - entry_credit,
+            breakeven_low=short_put["strike"] - entry_credit,
+            breakeven_high=short_call["strike"] + entry_credit,
+            put_delta=0, call_delta=0, prob_profit=0, return_pct=0,
+        )
+        _position_tracker.record_entry(
+            cand, tag=tag, contracts=contracts, entry_time=entry_time)
+        existing_tags.add(tag)
+        existing_leg_sets.append(leg_set)
+        result["adopted"].append({
+            "tag": tag, "symbol": underlying,
+            "expiration": expiration, "entry_credit": entry_credit,
+            "contracts": contracts,
+        })
+
+    # Drop orphan tracker entries (legs not in broker)
+    for t in list(_position_tracker.get_open()):
+        if not (set(t.leg_symbols()) & broker_symbols):
+            # Only drop if old enough to not be a fresh unfilled entry
+            import time
+            age = time.time() - (t.entry_time or time.time())
+            if age > 300:
+                _position_tracker.remove(t.tag)
+                result["dropped_orphans"].append(
+                    {"tag": t.tag, "symbol": t.symbol})
+
+    return result
+
+
+def _env_float_field(d, key):
+    """Safely extract a positive float from a dict."""
+    try:
+        v = float(d.get(key, 0) or 0)
+        return v if v > 0 else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 # -- Main --------------------------------------------------------------------

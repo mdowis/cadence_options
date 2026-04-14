@@ -1144,6 +1144,116 @@ def _reconcile_tracker_with_broker():
             "contracts": contracts,
         })
 
+    # Pass 2: adopt broker positions that have no matching tracker
+    # entry yet. For positions opened outside the bot or whose entry
+    # order isn't findable in /orders history, we reconstruct ICs by
+    # grouping broker legs by (underlying, expiration) and using
+    # Tradier's cost_basis field to back into the entry credit.
+    from collections import defaultdict
+    covered_symbols = set()
+    for t in _position_tracker.get_open():
+        covered_symbols.update(t.leg_symbols())
+
+    leftover_by_group = defaultdict(list)
+    for p in positions:
+        sym = p.get("symbol")
+        if not sym or sym in covered_symbols:
+            continue
+        parsed = _parse_occ_symbol(sym)
+        if not parsed:
+            continue
+        root, exp, opt_type, strike = parsed
+        try:
+            qty = float(p.get("quantity", 0) or 0)
+            cost_basis = float(p.get("cost_basis", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        leftover_by_group[(root, exp)].append({
+            "symbol": sym, "type": opt_type, "strike": strike,
+            "quantity": qty, "cost_basis": cost_basis,
+        })
+
+    result["adopted_from_positions"] = []
+    for (root, exp), legs in leftover_by_group.items():
+        if len(legs) != 4:
+            result["skipped_details"].append({
+                "order_id": "(broker positions)",
+                "reason": f"{root} {exp} has {len(legs)} leftover legs, "
+                          f"need exactly 4 for an iron condor",
+            })
+            continue
+        puts = sorted([l for l in legs if l["type"] == "put"],
+                      key=lambda l: l["strike"])
+        calls = sorted([l for l in legs if l["type"] == "call"],
+                       key=lambda l: l["strike"])
+        if len(puts) != 2 or len(calls) != 2:
+            continue
+        long_put, short_put = puts        # lower strike = long for puts
+        short_call, long_call = calls     # lower strike = short for calls
+        # Sanity check signs: shorts negative qty, longs positive
+        if (short_put["quantity"] >= 0 or short_call["quantity"] >= 0
+                or long_put["quantity"] <= 0 or long_call["quantity"] <= 0):
+            continue
+        contracts = abs(int(short_put["quantity"]))
+        if contracts <= 0:
+            contracts = 1
+
+        # Net credit from cost_basis. Tradier reports cost_basis as the
+        # dollar amount of the opening transaction: negative for shorts
+        # (we received money), positive for longs (we paid). Net credit
+        # received = -sum(cost_basis).
+        total_cost = sum(l["cost_basis"] for l in legs)
+        net_credit_dollars = -total_cost
+        if net_credit_dollars <= 0:
+            result["skipped_details"].append({
+                "order_id": "(broker positions)",
+                "reason": (f"{root} {exp} has 4 legs but cost_basis "
+                           f"sum (${total_cost:.2f}) doesn't look like "
+                           f"a credit IC. Skipping."),
+            })
+            continue
+        entry_credit = net_credit_dollars / 100.0 / contracts
+
+        try:
+            exp_date = datetime.strptime(exp, "%Y-%m-%d").date()
+            from datetime import date
+            dte_at_entry = (exp_date - date.today()).days
+        except ValueError:
+            dte_at_entry = 0
+
+        # Synthesize tag and check it's not already used
+        tag = (f"adopted-pos-{root}-{exp.replace('-','')}-"
+               f"{int(short_put['strike'])}-{int(short_call['strike'])}")
+        if tag in existing_tags:
+            continue
+
+        cand = IronCondorCandidate(
+            symbol=root, expiration=exp, dte=dte_at_entry, iv_rank=0,
+            short_put_symbol=short_put["symbol"],
+            short_put_strike=short_put["strike"],
+            long_put_symbol=long_put["symbol"],
+            long_put_strike=long_put["strike"],
+            short_call_symbol=short_call["symbol"],
+            short_call_strike=short_call["strike"],
+            long_call_symbol=long_call["symbol"],
+            long_call_strike=long_call["strike"],
+            credit=entry_credit, credit_mid=entry_credit,
+            max_loss=max(short_put["strike"] - long_put["strike"],
+                          long_call["strike"] - short_call["strike"])
+                     - entry_credit,
+            breakeven_low=short_put["strike"] - entry_credit,
+            breakeven_high=short_call["strike"] + entry_credit,
+            put_delta=0, call_delta=0, prob_profit=0, return_pct=0,
+        )
+        _position_tracker.record_entry(cand, tag=tag, contracts=contracts)
+        existing_tags.add(tag)
+        result["adopted_from_positions"].append({
+            "tag": tag, "symbol": root, "expiration": exp,
+            "entry_credit": round(entry_credit, 2),
+            "contracts": contracts,
+            "source": "cost_basis",
+        })
+
     # Drop orphan tracker entries (legs not in broker)
     for t in list(_position_tracker.get_open()):
         if not (set(t.leg_symbols()) & broker_symbols):

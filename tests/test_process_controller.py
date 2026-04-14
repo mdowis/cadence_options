@@ -437,8 +437,103 @@ class TestPhantomCleanup(unittest.TestCase):
                                    entry_time=time.time())
         self.trader.get_orders.return_value = []
         self.pc._cleanup_phantoms()
+        # Fresh entry stays put (within grace period). get_orders IS
+        # called once at the top of cleanup (cached for the pass) but
+        # we never invoke position_was_filled for this entry.
         self.assertEqual([t.tag for t in self.tracker.get_open()], ["t-fresh"])
-        self.trader.get_orders.assert_not_called()
+
+
+class TestPhantomCleanupApiFailure(unittest.TestCase):
+    """Regression: when Tradier rate-limits us, get_orders fails. We
+    must NOT drop tracker entries on API failure or we'd silently lose
+    real positions whenever the API is unreachable."""
+
+    def setUp(self):
+        from cadence.position_manager import PositionManager
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.trader = MagicMock()
+        self.risk_mgr = RiskManager(RiskConfig(), starting_equity_cents=1000000)
+        self.tracker = PositionTracker(state_file=None)
+        self.pc = ProcessController(
+            self.trader, self.risk_mgr, StrategyConfig(),
+            dry_run=False, scan_interval=60,
+            position_manager=PositionManager(),
+            position_tracker=self.tracker,
+        )
+        c = IronCondorCandidate(
+            symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+            short_put_symbol="SPY260530P00435000", short_put_strike=435,
+            long_put_symbol="SPY260530P00425000", long_put_strike=425,
+            short_call_symbol="SPY260530C00465000", short_call_strike=465,
+            long_call_symbol="SPY260530C00475000", long_call_strike=475,
+            credit=2.40, max_loss=7.60,
+            breakeven_low=432, breakeven_high=468,
+            put_delta=-0.16, call_delta=0.16,
+            prob_profit=70, return_pct=30,
+        )
+        old_time = time.time() - (self.pc.PHANTOM_GRACE_SECS + 60)
+        self.tracker.record_entry(c, tag="t-real", contracts=1,
+                                   entry_time=old_time)
+
+    def test_get_orders_failure_defers_cleanup(self):
+        """API rate-limit (or any get_orders failure) must NOT cause
+        tracker entries to be dropped as phantoms."""
+        self.trader.get_orders.side_effect = RuntimeError("rate limited")
+        self.assertEqual(len(self.tracker.get_open()), 1)
+        self.pc._cleanup_phantoms()
+        # Entry must still be present
+        self.assertEqual(len(self.tracker.get_open()), 1)
+
+
+class TestPositionWasFilledTriState(unittest.TestCase):
+    """position_was_filled returns True/False/None."""
+
+    def setUp(self):
+        from cadence.position_tracker import PositionTracker, TrackedPosition
+        self.tracker = PositionTracker(state_file=None)
+        self.tracked = TrackedPosition(
+            tag="t1", symbol="SPY", expiration="2026-05-30",
+            dte_at_entry=45, contracts=1, entry_credit=2.40,
+            entry_time=time.time(),
+            short_put_symbol="A", long_put_symbol="B",
+            short_call_symbol="C", long_call_symbol="D",
+            short_put_strike=1, long_put_strike=2,
+            short_call_strike=3, long_call_strike=4,
+        )
+
+    def test_returns_true_for_filled_match(self):
+        trader = MagicMock()
+        trader.get_orders.return_value = [
+            {"tag": "t1", "status": "filled"},
+        ]
+        self.assertTrue(self.tracker.position_was_filled(
+            self.tracked, trader))
+
+    def test_returns_false_when_no_filled_match(self):
+        trader = MagicMock()
+        trader.get_orders.return_value = [
+            {"tag": "t1", "status": "open"},
+        ]
+        self.assertEqual(self.tracker.position_was_filled(
+            self.tracked, trader), False)
+
+    def test_returns_none_on_api_failure(self):
+        """API down -> None (not False). Callers must distinguish
+        'unknown' from 'confirmed not filled'."""
+        trader = MagicMock()
+        trader.get_orders.side_effect = RuntimeError("503")
+        self.assertIsNone(self.tracker.position_was_filled(
+            self.tracked, trader))
+
+    def test_uses_provided_orders_cache(self):
+        """If `orders` kwarg is provided, no API call should happen."""
+        trader = MagicMock()
+        cached = [{"tag": "t1", "status": "filled"}]
+        result = self.tracker.position_was_filled(
+            self.tracked, trader, orders=cached)
+        self.assertTrue(result)
+        trader.get_orders.assert_not_called()
 
 
 class TestSpuriousCloseDetection(unittest.TestCase):

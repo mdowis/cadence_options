@@ -516,6 +516,18 @@ class ProcessController:
         which detect_closes can't handle (it only fires when ALL legs
         are missing from broker positions, but the real IC's legs are
         present)."""
+        # Fetch the order list ONCE for the whole cleanup pass so we
+        # don't issue N get_orders calls and burn Tradier rate limit.
+        # If the API is unreachable, abort the cleanup pass entirely
+        # rather than treating every position as a phantom (which
+        # would silently delete real positions on rate-limit errors).
+        try:
+            cached_orders = self.trader.get_orders()
+        except Exception as e:
+            logger.warning("Phantom cleanup: get_orders failed (%s); "
+                           "deferring cleanup so we don't drop real "
+                           "positions when the API is unreachable", e)
+            return
         now = time.time()
         for tracked in self.position_tracker.get_open():
             age = now - (tracked.entry_time or now)
@@ -523,12 +535,14 @@ class ProcessController:
                 continue
             try:
                 filled = self.position_tracker.position_was_filled(
-                    tracked, self.trader)
+                    tracked, self.trader, orders=cached_orders)
             except Exception as e:
                 logger.warning("Phantom check for %s raised: %s",
                                tracked.tag, e)
                 continue
-            if not filled:
+            # Tri-state: only drop on EXPLICIT False. None means we
+            # couldn't determine -- leave the entry, retry next sync.
+            if filled is False:
                 logger.info(
                     "Tracker: dropping phantom tag=%s symbol=%s "
                     "(age=%.0fs, no filled order at broker)",
@@ -564,13 +578,22 @@ class ProcessController:
                 #      The legs never appeared, so 'all legs missing'
                 #      doesn't mean 'closed' -- it means 'never opened'.
                 #      Silently drop without recording a trade.
-                if not self.position_tracker.position_was_filled(
-                        tracked, self.trader):
+                filled = self.position_tracker.position_was_filled(
+                    tracked, self.trader)
+                if filled is False:
                     logger.info(
                         "Tracker: dropping unfilled tag=%s "
                         "(entry order never filled, no trade recorded)",
                         tracked.tag)
                     self.position_tracker.remove(tracked.tag)
+                    continue
+                if filled is None:
+                    # API unreachable; defer so we don't drop a real
+                    # position. detect_closes will retry next sync.
+                    logger.warning(
+                        "Tracker: cannot determine fill status for "
+                        "tag=%s (API unreachable). Deferring; will "
+                        "retry next sync.", tracked.tag)
                     continue
                 # Filled but we can't resolve close P&L
                 detail = (detail if isinstance(detail, str)

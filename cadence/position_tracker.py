@@ -230,21 +230,27 @@ class PositionTracker:
                 pos.close_attempted_reason = reason
                 self._save_unlocked()
 
-    def position_was_filled(self, tracked, trader):
-        """True if any order with this tag has been filled.
+    def position_was_filled(self, tracked, trader, orders=None):
+        """Tri-state check for whether the entry order ever filled.
 
-        Used to distinguish a real close (entry filled, then exited)
-        from a phantom close (entry was placed but never filled, so
-        the legs never appeared in Tradier positions and we mistakenly
-        thought the position 'closed' on the next sync).
+        Returns:
+          True  -- a filled order with matching tag exists
+          False -- API succeeded, no filled order with matching tag
+          None  -- API failed; we don't know. Callers MUST NOT treat
+                   None as 'not filled' or they'll drop real positions
+                   whenever Tradier is rate-limited or unreachable.
+
+        `orders` may be provided to skip the API call (caller has
+        already fetched a per-request cache).
         """
-        try:
-            orders = trader.get_orders()
-        except Exception as e:
-            logger.warning("position_was_filled: get_orders failed: %s", e)
-            # We can't tell -- err on the side of NOT recording a trade
-            # so we don't fabricate a close that didn't happen.
-            return False
+        if orders is None:
+            try:
+                orders = trader.get_orders()
+            except Exception as e:
+                logger.warning("position_was_filled: get_orders failed: %s", e)
+                return None
+        if orders is None:
+            return None
         for o in orders:
             if o.get("tag") != tracked.tag:
                 continue
@@ -253,7 +259,7 @@ class PositionTracker:
                 return True
         return False
 
-    def get_entry_fill_price(self, tracked, trader):
+    def get_entry_fill_price(self, tracked, trader, orders=None):
         """Return the actual avg_fill_price of the entry order from
         Tradier, or None if not yet filled or not found.
 
@@ -261,17 +267,21 @@ class PositionTracker:
         not our pre-fill midpoint estimate. Use this for unrealized
         P&L display whenever available.
 
+        `orders` may be provided to skip the API call (caller has
+        already fetched a per-request cache).
+
         Matching strategy (most to least precise):
           1. Exact tag + filled + credit order
           2. Exact tag + filled (any type)
           3. Filled multileg order whose legs match ours 1-to-1
           4. None (fall back to midpoint estimate)
         """
-        try:
-            orders = trader.get_orders()
-        except Exception as e:
-            logger.warning("get_entry_fill_price: get_orders failed: %s", e)
-            return None
+        if orders is None:
+            try:
+                orders = trader.get_orders()
+            except Exception as e:
+                logger.warning("get_entry_fill_price: get_orders failed: %s", e)
+                return None
 
         if not orders:
             logger.info("get_entry_fill_price: no orders returned for tag=%s",

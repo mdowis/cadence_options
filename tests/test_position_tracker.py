@@ -209,14 +209,16 @@ class TestPositionWasFilled(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_returns_false_on_api_error(self):
-        """Defensive default: no record_trade if we can't tell."""
+    def test_returns_none_on_api_error(self):
+        """Returns None (not False) on API failure -- callers must
+        distinguish 'unknown' from 'confirmed unfilled' so they
+        don't drop real positions when the API is unreachable."""
         t, path = self._tracker_with_entry()
         try:
             trader = MagicMock()
             trader.get_orders.side_effect = RuntimeError("api down")
             pos = t.get_by_tag("cadence-abc")
-            self.assertFalse(t.position_was_filled(pos, trader))
+            self.assertIsNone(t.position_was_filled(pos, trader))
         finally:
             os.unlink(path)
 

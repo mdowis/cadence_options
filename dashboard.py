@@ -335,11 +335,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             # Real close orders still price at the conservative bid/ask
             # boundary -- see compute_close_debit.
             from cadence.executor import (
-                compute_close_debit_mid, _legs_from_chain, _safe_float)
+                compute_close_debit_mid, _legs_from_chain, _safe_float,
+                _opt_mid)
             tracked_info = []
-            # Cache underlying quotes per request -- multiple ICs
-            # often share the same underlying.
+            # Per-request caches so we don't smash Tradier rate limits.
+            # Without these, N tracker entries would issue ~3N API calls
+            # per refresh (one chain, one orders, one quote each), which
+            # at 5 ICs and a 5s refresh easily exceeds 120/min.
             _spot_cache = {}
+            _chain_cache = {}
+            _orders_cache_holder = [None, False]  # [orders, fetched_flag]
+
             def _get_spot(sym):
                 if sym in _spot_cache:
                     return _spot_cache[sym]
@@ -350,6 +356,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     spot = 0
                 _spot_cache[sym] = spot
                 return spot
+
+            def _get_chain(sym, exp):
+                key = (sym, exp)
+                if key in _chain_cache:
+                    return _chain_cache[key]
+                try:
+                    chain = _trader.get_option_chain(sym, exp, greeks=False)
+                except Exception:
+                    chain = []
+                by_sym = {}
+                for o in chain:
+                    s = o.get("symbol")
+                    if s:
+                        by_sym[s] = o
+                _chain_cache[key] = by_sym
+                return by_sym
+
+            def _get_orders():
+                if not _orders_cache_holder[1]:
+                    _orders_cache_holder[1] = True
+                    try:
+                        _orders_cache_holder[0] = _trader.get_orders()
+                    except Exception:
+                        _orders_cache_holder[0] = None
+                return _orders_cache_holder[0]
+
             if _position_tracker and _trader and _trader.authenticated:
                 # Prefer actual fill price from Tradier's order history
                 # over our pre-fill midpoint estimate.
@@ -358,11 +390,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     pnl_dollars = None
                     pnl_pct = None
 
-                    # 1. Try the actual fill price from Tradier orders
+                    # 1. Try the actual fill price from Tradier orders.
+                    # Use the per-request orders cache so we hit
+                    # /accounts/{id}/orders ONCE per refresh, not N times.
                     actual_fill = None
+                    cached_orders = _get_orders()
                     try:
                         actual_fill = _position_tracker.get_entry_fill_price(
-                            t, _trader)
+                            t, _trader, orders=cached_orders)
                     except Exception:
                         actual_fill = None
 
@@ -377,15 +412,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         entry_source = ("mid" if entry_for_pnl != t.entry_credit
                                         else "legacy")
                     is_legacy = (entry_source == "legacy")
-                    try:
-                        sp, lp, sc, lc, _by_sym = _legs_from_chain(_trader, t)
-                    except Exception:
-                        sp = lp = sc = lc = None
-                    if sp is not None:
+                    # Use per-request chain cache: with multiple ICs in
+                    # the same expiration we'd otherwise refetch the
+                    # same chain N times per refresh.
+                    by_sym = _get_chain(t.symbol, t.expiration)
+                    sp = by_sym.get(t.short_put_symbol, {})
+                    lp = by_sym.get(t.long_put_symbol, {})
+                    sc = by_sym.get(t.short_call_symbol, {})
+                    lc = by_sym.get(t.long_call_symbol, {})
+                    if by_sym:
                         # Compute midpoint debit
-                        from cadence.executor import _opt_mid as _mid_fn
-                        debit = (_mid_fn(sp) + _mid_fn(sc)
-                                 - _mid_fn(lp) - _mid_fn(lc))
+                        debit = (_opt_mid(sp) + _opt_mid(sc)
+                                 - _opt_mid(lp) - _opt_mid(lc))
                         if debit == 0 and all(o == {} for o in (sp, lp, sc, lc)):
                             debit = None
                         # For legacy entries, adjust entry upward by

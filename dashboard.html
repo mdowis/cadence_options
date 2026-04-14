@@ -910,20 +910,20 @@ function renderTracked(tracked) {
     var pnlPctStr = pnlPct == null ? '--' : pnlPct.toFixed(1) + '%';
     var currentStr = p.current_debit == null ? '--' : '$' + p.current_debit.toFixed(2);
     // Show entry_credit_mid so Entry - Current = P&L visually (both
-    // are midpoint-based). Flag with * if this row predates the
-    // credit_mid fix -- those fall back to the conservative entry
-    // value and will show a small phantom loss until closed + reopened.
-    var entryMid = p.entry_credit_mid;
-    var entryBid = p.entry_credit;
-    var entryShown = entryMid != null ? entryMid : entryBid;
-    var legacyFlag = (entryMid != null && entryBid != null
-                      && Math.abs(entryMid - entryBid) < 0.001) ? '*' : '';
+    // are midpoint-based). For pre-upgrade entries the server
+    // estimates a midpoint from the current chain spread -- flag
+    // those with ~ since it's an approximation.
+    var entryShown = p.entry_credit_mid != null
+        ? p.entry_credit_mid : p.entry_credit;
+    var estimated = p.entry_is_estimated;
+    var entryMark = estimated ? '~' : '';
     var entryStr = entryShown != null
-        ? ('$' + entryShown.toFixed(2) + legacyFlag) : '--';
-    var entryTitle = legacyFlag
-        ? 'Pre-upgrade entry: stored at conservative bid-side value. '
-          + 'P&L may show phantom loss until this position is closed '
-          + 'and a new one opens with midpoint entry tracking.'
+        ? (entryMark + '$' + entryShown.toFixed(2)) : '--';
+    var entryTitle = estimated
+        ? 'Estimated midpoint entry (~). This row predates midpoint '
+          + 'tracking; the server estimates the original midpoint '
+          + 'from the current chain spread. Close + reopen the '
+          + 'position for an exact midpoint.'
         : 'Midpoint entry credit';
     var tag = p.tag || '';
     var tagShort = tag.length > 14 ? tag.substring(0, 14) + '..' : tag;
@@ -1113,15 +1113,20 @@ async function doRefresh() {
     el('dd-bar-fill').style.width = ddFillPct + '%';
     el('dd-bar-fill').style.background = ddColor;
 
-    // Exposure stat
+    // Exposure stat. pos.count is now IC count (apples-to-apples
+    // with max_position_count), NOT per-leg count.
     var deltaD = (greeks.delta_cents || 0) / 100;
     el('s-exposure').textContent = (deltaD >= 0 ? '+' : '') + '$' + deltaD.toFixed(0);
-    el('s-exposure-sub').textContent = (pos.count || 0) + ' of ' + (pos.max || 5) + ' max';
+    el('s-exposure-sub').textContent = (pos.count || 0) + ' of ' + (pos.max || 5) + ' ICs max';
 
-    // Positions stat
-    el('s-positions').textContent = pos.count || 0;
+    // Open Legs (broker) stat. pos.leg_count is raw Tradier per-leg
+    // count, informational. pos.count (IC count) shown as subtitle.
+    el('s-positions').textContent = pos.leg_count != null ? pos.leg_count : 0;
+    var icLabel = (pos.count || 0) + ' IC' + (pos.count === 1 ? '' : 's');
     var absDelta = Math.abs(deltaD);
-    el('s-positions-sub').textContent = absDelta < 50 ? 'delta neutral' : (deltaD > 0 ? 'long' : 'short') + ' $' + absDelta.toFixed(0);
+    var deltaLabel = absDelta < 50 ? 'delta neutral' :
+                     (deltaD > 0 ? 'long' : 'short') + ' $' + absDelta.toFixed(0);
+    el('s-positions-sub').textContent = icLabel + ' - ' + deltaLabel;
 
     // Trades today stat -- combine opens (from executor) and closes.
     // procs isn't in scope here yet; pull trades_placed defensively.

@@ -325,24 +325,46 @@ class DashboardHandler(BaseHTTPRequestHandler):
             # dashboard isn't chronically pessimistic on wide spreads.
             # Real close orders still price at the conservative bid/ask
             # boundary -- see compute_close_debit.
-            from cadence.executor import compute_close_debit_mid
+            from cadence.executor import (
+                compute_close_debit_mid, _legs_from_chain, _safe_float)
             tracked_info = []
             if _position_tracker and _trader and _trader.authenticated:
                 for t in _position_tracker.get_open():
                     debit = None
                     pnl_dollars = None
                     pnl_pct = None
-                    try:
-                        debit, _ = compute_close_debit_mid(_trader, t)
-                    except Exception:
-                        debit = None
-                    # Use mid-vs-mid for fair P&L. entry_credit_mid was
-                    # captured at strategy time using the same midpoint
-                    # convention as compute_close_debit_mid, so the
-                    # display shows true economic P&L without a
-                    # half-spread bias on either side.
                     entry_for_pnl = getattr(t, "entry_credit_mid",
                                             t.entry_credit)
+                    # Legacy entries (recorded before we captured
+                    # credit_mid) have entry_credit_mid == entry_credit.
+                    # We ESTIMATE the real midpoint entry by adding
+                    # half the current chain's per-leg bid-ask spread
+                    # back to the conservative stored value. Not
+                    # perfect -- spreads at entry may differ from
+                    # spreads now -- but removes the chronic phantom
+                    # loss bias for old entries.
+                    is_legacy = abs(entry_for_pnl - t.entry_credit) < 0.001
+                    try:
+                        sp, lp, sc, lc, _by_sym = _legs_from_chain(_trader, t)
+                    except Exception:
+                        sp = lp = sc = lc = None
+                    if sp is not None:
+                        # Compute midpoint debit
+                        from cadence.executor import _opt_mid as _mid_fn
+                        debit = (_mid_fn(sp) + _mid_fn(sc)
+                                 - _mid_fn(lp) - _mid_fn(lc))
+                        if debit == 0 and all(o == {} for o in (sp, lp, sc, lc)):
+                            debit = None
+                        # For legacy entries, adjust entry upward by
+                        # the sum of half-spreads on all four legs.
+                        if is_legacy and debit is not None:
+                            half_spread_sum = 0.0
+                            for leg in (sp, sc, lp, lc):
+                                bid = _safe_float(leg.get("bid"))
+                                ask = _safe_float(leg.get("ask"))
+                                if bid > 0 and ask > 0:
+                                    half_spread_sum += (ask - bid) / 2
+                            entry_for_pnl = t.entry_credit + half_spread_sum
                     if debit is not None and entry_for_pnl > 0:
                         pnl_dollars = (entry_for_pnl - debit) * 100 * t.contracts
                         pnl_pct = ((entry_for_pnl - debit)
@@ -355,6 +377,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "contracts": t.contracts,
                         "entry_credit": t.entry_credit,
                         "entry_credit_mid": entry_for_pnl,
+                        "entry_is_estimated": is_legacy,
                         "current_debit": debit,  # midpoint
                         "pnl_dollars": pnl_dollars,
                         "pnl_pct": pnl_pct,

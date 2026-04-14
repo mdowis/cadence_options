@@ -443,10 +443,26 @@ class ProcessController:
 
         try:
             positions = self.trader.get_positions()
-            self.risk_mgr.update_position_count(len(positions))
         except Exception as e:
             logger.warning("Position count sync error: %s", e)
             positions = None
+
+        # Position count semantics:
+        #   ic_count = number of bot-managed iron condors (from tracker).
+        #              This is what max_position_count is meant to limit.
+        #   leg_count = raw per-leg count from Tradier (informational).
+        # Previously we were passing leg_count as position_count, which
+        # caused the risk check to trip at leg_count >= 5 (i.e., ~1 IC)
+        # and made the dashboard show '8 of 5 max' when the user had
+        # 2 ICs (8 legs).
+        leg_count = len(positions) if positions is not None else 0
+        if self.position_tracker is not None:
+            ic_count = len(self.position_tracker.get_open())
+        else:
+            # No tracker: estimate IC count as legs/4 (assumes all
+            # broker positions are part of 4-leg iron condors).
+            ic_count = leg_count // 4
+        self.risk_mgr.update_position_count(ic_count, leg_count=leg_count)
 
         # Aggregate portfolio Greeks from open positions
         if positions:

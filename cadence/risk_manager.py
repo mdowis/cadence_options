@@ -93,7 +93,12 @@ class RiskState:
         self.portfolio_theta_cents = 0
 
         # Position tracking
+        # position_count = number of bot-managed iron condors (from
+        # position_tracker). Used for the max_position_count risk
+        # check. leg_count = raw per-leg count from Tradier, for
+        # display only (informational).
         self.position_count = 0
+        self.position_leg_count = 0
         self.consecutive_losses = 0
 
         # Kill switch
@@ -420,10 +425,17 @@ class RiskManager:
             self._cap_history()
             self._save_state()
 
-    def update_position_count(self, count):
-        """Update the current open position count."""
+    def update_position_count(self, count, leg_count=None):
+        """Update counts.
+
+        count: number of bot-managed iron condors (from tracker). Used
+               for the max_position_count risk check.
+        leg_count: raw per-leg count from Tradier (informational only).
+        """
         with self._lock:
             self._state.position_count = count
+            if leg_count is not None:
+                self._state.position_leg_count = leg_count
             self._save_state()
 
     def update_greeks(self, delta_cents=0, gamma_cents=0, vega_cents=0, theta_cents=0):
@@ -472,7 +484,8 @@ class RiskManager:
                     "theta_cents": self._state.portfolio_theta_cents,
                 },
                 "positions": {
-                    "count": self._state.position_count,
+                    "count": self._state.position_count,      # IC count
+                    "leg_count": self._state.position_leg_count,  # broker legs
                     "max": self.config.max_position_count,
                 },
                 "kill_switch": {

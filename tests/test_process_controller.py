@@ -212,16 +212,47 @@ class TestBrokerSync(unittest.TestCase):
         self.assertEqual(status["equity"]["current"], 1000000)  # $10,000 in cents
 
     def test_sync_updates_position_count(self):
+        """With no position_tracker attached, IC count = leg_count // 4.
+        4 leg positions from the mock broker -> 1 iron condor."""
         self.pc._sync_broker_state()
         status = self.risk_mgr.get_status()
-        self.assertEqual(status["positions"]["count"], 4)
+        self.assertEqual(status["positions"]["count"], 1)
+        self.assertEqual(status["positions"]["leg_count"], 4)
 
     def test_sync_resilient_to_balance_failure(self):
         self.trader.get_account_balances.side_effect = RuntimeError("api down")
         # Shouldn't raise; position count still syncs
         self.pc._sync_broker_state()
         status = self.risk_mgr.get_status()
-        self.assertEqual(status["positions"]["count"], 4)
+        self.assertEqual(status["positions"]["count"], 1)
+        self.assertEqual(status["positions"]["leg_count"], 4)
+
+    def test_sync_with_tracker_uses_tracker_count(self):
+        """When a tracker is attached, IC count = len(tracker.get_open()),
+        not leg_count // 4. This handles cases where tracker has more
+        entries than broker legs/4 (overlapping legs across ICs)."""
+        from cadence.position_tracker import PositionTracker
+        from cadence.strategy import IronCondorCandidate
+        self.pc.position_tracker = PositionTracker(state_file=None)
+        # Record 3 distinct tracked ICs
+        for i in range(3):
+            c = IronCondorCandidate(
+                symbol="SPY", expiration="2026-05-30", dte=45, iv_rank=50,
+                short_put_symbol="SPY260530P00435000", short_put_strike=435,
+                long_put_symbol="SPY260530P00425000", long_put_strike=425,
+                short_call_symbol="SPY260530C00465000", short_call_strike=465,
+                long_call_symbol="SPY260530C00475000", long_call_strike=475,
+                credit=2.40, max_loss=7.60,
+                breakeven_low=432, breakeven_high=468,
+                put_delta=-0.16, call_delta=0.16,
+                prob_profit=70, return_pct=30,
+            )
+            self.pc.position_tracker.record_entry(c, tag=f"t-{i}", contracts=1)
+        self.pc._sync_broker_state()
+        status = self.risk_mgr.get_status()
+        self.assertEqual(status["positions"]["count"], 3)
+        # Broker still reports 4 raw leg entries
+        self.assertEqual(status["positions"]["leg_count"], 4)
 
     def test_sync_resilient_to_position_failure(self):
         self.trader.get_positions.side_effect = RuntimeError("api down")

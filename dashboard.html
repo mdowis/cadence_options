@@ -387,6 +387,10 @@ trade ledger. Use these to decide whether to tweak the strategy.">
     </div>
     <div id="ledger-stats" style="display:flex;gap:18px;flex-wrap:wrap;
          font-size:12px;margin-bottom:10px"></div>
+    <div id="ledger-unresolved-banner" style="display:none;margin-bottom:10px;
+         padding:6px 10px;background:rgba(249,115,22,0.12);
+         border:1px solid rgba(249,115,22,0.4);border-radius:4px;
+         font-size:11px;color:var(--text)"></div>
     <div id="ledger-by-reason" style="font-size:11px;color:var(--dim);
          margin-bottom:10px"></div>
     <table>
@@ -747,6 +751,24 @@ function confirmLive2() {
   cancelConfirm();
   // Production requires the explicit confirm header on the server too
   setDryRun(false, {'X-Cadence-Confirm-Live': 'CONFIRM-PRODUCTION-LIVE'});
+}
+
+async function purgeUnresolved() {
+  if (!confirm('Remove UNRESOLVED phantom-close records from the ledger? ' +
+               'This rewrites trade_ledger.jsonl keeping only real trades. ' +
+               'The removed records had $0 P&L and came from API timeouts, ' +
+               'not real closes.')) return;
+  var r = await api('POST', '/api/trade-ledger/purge-unresolved');
+  if (r && r._error) {
+    alert('Purge failed: HTTP ' + r.status + ' ' + r.body);
+    return;
+  }
+  if (r && r.error) {
+    alert('Purge failed: ' + r.error);
+    return;
+  }
+  alert('Purged ' + (r.removed || 0) + ' UNRESOLVED records from the ledger.');
+  doRefresh();
 }
 
 async function doReconcile() {
@@ -1562,6 +1584,27 @@ function renderLedger(payload) {
   } else {
     statsHost.innerHTML = '<span style="color:var(--dim)">' +
       'No closed trades yet -- stats appear after the first close.</span>';
+  }
+
+  // UNRESOLVED banner -- these are phantom closes from the old
+  // get_orders-timeout bug. Offer a one-click purge so stats aren't
+  // polluted by trades that never actually closed.
+  var unresolvedHost = el('ledger-unresolved-banner');
+  if (stats.unresolved && stats.unresolved > 0) {
+    unresolvedHost.style.display = 'block';
+    unresolvedHost.innerHTML =
+      '<strong style="color:var(--orange)">' + stats.unresolved +
+      ' UNRESOLVED record' + (stats.unresolved === 1 ? '' : 's') +
+      '</strong> in the ledger. These are phantom closes from an ' +
+      'earlier bug where API timeouts triggered fake $0 closes ' +
+      '(the underlying positions actually stayed open). They are ' +
+      'excluded from the win/loss stats above but pollute the ' +
+      'trade count. ' +
+      '<button class="btn btn-sm btn-red" ' +
+      'style="margin-left:8px" onclick="purgeUnresolved()">' +
+      'Purge UNRESOLVED records</button>';
+  } else {
+    unresolvedHost.style.display = 'none';
   }
 
   // Per-exit-reason breakdown

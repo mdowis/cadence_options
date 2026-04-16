@@ -608,6 +608,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 _risk_mgr.reset_daily()
             self._send_json({"status": "reset"})
 
+        elif path == "/api/trade-ledger/purge-unresolved":
+            # Remove phantom UNRESOLVED closes from the ledger.
+            # These were recorded by the pre-tri-state buggy code when
+            # Tradier get_orders timed out; they have pnl=$0 and
+            # distort stats.
+            if not _trade_ledger:
+                self._send_json({"error": "no ledger"}, 500)
+                return
+            removed = _trade_ledger.purge_unresolved()
+            self._send_json({"ok": True, "removed": removed})
+
         elif path == "/api/reconcile":
             # Bring the tracker back into parity with the broker.
             # Walks Tradier's filled credit multileg orders, and for

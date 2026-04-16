@@ -163,17 +163,36 @@ class TradeLedger:
         return records
 
     def summary_stats(self):
-        """Aggregate stats for strategy analysis."""
-        records = self.read_all()
+        """Aggregate stats for strategy analysis.
+
+        UNRESOLVED records are excluded from win/loss/avg calculations
+        because they don't represent real trade outcomes -- they're
+        phantom closes from API timeouts where we couldn't determine
+        the real P&L. Counting them as 'losses' (pnl_cents=0 isn't
+        a win) would bias every stat downward.
+
+        They're still reported as a separate 'unresolved' count so
+        operators can see how many phantom closes polluted their
+        ledger and decide whether to clean it up.
+        """
+        all_records = self.read_all()
+        unresolved = [r for r in all_records
+                      if (r.get("exit_reason") or "").upper() == "UNRESOLVED"]
+        records = [r for r in all_records
+                   if (r.get("exit_reason") or "").upper() != "UNRESOLVED"]
+
         if not records:
             return {
                 "n": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
                 "avg_win": 0.0, "avg_loss": 0.0,
                 "total_pnl": 0.0, "avg_duration_days": 0.0,
+                "unresolved": len(unresolved),
+                "total_records": len(all_records),
                 "by_exit_reason": {},
             }
         wins = [r for r in records if r.get("win")]
-        losses = [r for r in records if not r.get("win")]
+        # A real loss has pnl < 0 (not just != win). $0 pnl is neither.
+        losses = [r for r in records if (r.get("pnl_dollars") or 0) < 0]
         total_pnl = sum(r.get("pnl_dollars", 0) or 0 for r in records)
         avg_win = (sum(r.get("pnl_dollars", 0) or 0 for r in wins)
                    / len(wins)) if wins else 0
@@ -183,7 +202,7 @@ class TradeLedger:
                         / len(records)) if records else 0
 
         by_reason = {}
-        for r in records:
+        for r in all_records:  # include unresolved here for visibility
             reason = r.get("exit_reason", "unknown")
             entry = by_reason.setdefault(
                 reason, {"count": 0, "wins": 0, "total_pnl": 0.0})
@@ -201,8 +220,51 @@ class TradeLedger:
             "avg_loss": avg_loss,
             "total_pnl": total_pnl,
             "avg_duration_days": avg_duration,
+            "unresolved": len(unresolved),
+            "total_records": len(all_records),
             "by_exit_reason": by_reason,
         }
+
+    def purge_unresolved(self):
+        """Remove UNRESOLVED phantom-close records from the ledger.
+
+        Rewrites the ledger file keeping only records whose
+        exit_reason is not UNRESOLVED. Returns the count removed.
+        """
+        if not self.path or not os.path.isfile(self.path):
+            return 0
+        with self._lock:
+            try:
+                with open(self.path, "r") as f:
+                    lines = f.readlines()
+            except OSError as e:
+                logger.warning("Purge read failed: %s", e)
+                return 0
+            kept = []
+            removed = 0
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    kept.append(line)
+                    continue
+                if (rec.get("exit_reason") or "").upper() == "UNRESOLVED":
+                    removed += 1
+                    continue
+                kept.append(line)
+            if removed == 0:
+                return 0
+            try:
+                with open(self.path, "w") as f:
+                    for line in kept:
+                        f.write(line + "\n")
+            except OSError as e:
+                logger.warning("Purge write failed: %s", e)
+                return 0
+            return removed
 
 
 def _iso(ts):

@@ -172,6 +172,65 @@ class TestTradeLedgerStats(unittest.TestCase):
         self.assertEqual(stats["by_exit_reason"]["time_stop"]["count"], 1)
 
 
+class TestPurgeUnresolved(unittest.TestCase):
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(fd)
+        os.unlink(self.path)
+        self.ledger = TradeLedger(path=self.path)
+
+    def tearDown(self):
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+    def test_purge_removes_unresolved(self):
+        t = _tracked_position()
+        self.ledger.record_close(t, pnl_cents=10000,
+                                  exit_reason="profit_target")
+        self.ledger.record_close(t, pnl_cents=0, exit_reason="UNRESOLVED")
+        self.ledger.record_close(t, pnl_cents=-5000,
+                                  exit_reason="loss_stop")
+        self.ledger.record_close(t, pnl_cents=0, exit_reason="UNRESOLVED")
+        self.assertEqual(len(self.ledger.read_all()), 4)
+
+        removed = self.ledger.purge_unresolved()
+
+        self.assertEqual(removed, 2)
+        remaining = self.ledger.read_all()
+        self.assertEqual(len(remaining), 2)
+        reasons = [r["exit_reason"] for r in remaining]
+        self.assertIn("profit_target", reasons)
+        self.assertIn("loss_stop", reasons)
+        self.assertNotIn("UNRESOLVED", reasons)
+
+    def test_purge_no_unresolved_is_noop(self):
+        t = _tracked_position()
+        self.ledger.record_close(t, pnl_cents=10000,
+                                  exit_reason="profit_target")
+        removed = self.ledger.purge_unresolved()
+        self.assertEqual(removed, 0)
+        self.assertEqual(len(self.ledger.read_all()), 1)
+
+    def test_stats_exclude_unresolved_from_win_loss(self):
+        """UNRESOLVED records do not inflate loss counts. They're
+        reported separately in the 'unresolved' field."""
+        t = _tracked_position()
+        self.ledger.record_close(t, pnl_cents=10000,
+                                  exit_reason="profit_target")
+        self.ledger.record_close(t, pnl_cents=0, exit_reason="UNRESOLVED")
+        self.ledger.record_close(t, pnl_cents=0, exit_reason="UNRESOLVED")
+        stats = self.ledger.summary_stats()
+        self.assertEqual(stats["n"], 1)  # only real trades
+        self.assertEqual(stats["wins"], 1)
+        self.assertEqual(stats["losses"], 0)
+        self.assertEqual(stats["unresolved"], 2)
+        self.assertEqual(stats["total_records"], 3)
+        self.assertEqual(stats["win_rate"], 100.0)
+
+
 class TestTradeLedgerNoPath(unittest.TestCase):
     """Ledger with path=None should not write but should still build records."""
 
